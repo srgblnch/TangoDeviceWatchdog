@@ -1,0 +1,14 @@
+#!/bin/sh
+
+if [[ $# -eq 1 ]] ; then
+    echo "Setting logs to minimum"
+    VERBOSE='-v1'
+else
+    echo "Setting logs to $2"
+    VERBOSE=$2
+fi
+
+DNAME=CameraMonitor
+
+#python $SICILIA/ds/python/$DNAME/$DNAME.py $1 $VERBOSE
+screen -dm -S $DNAME-$1 -h 1000 python $SICILIA/ds/python/$DNAME/$DNAME.py $1 $VERBOSE
