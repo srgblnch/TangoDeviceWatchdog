@@ -62,7 +62,11 @@ import time
 import traceback
 import threading
 
-DEFAULT_RECHECK_TIME = 10#seconds
+DEFAULT_RECHECK_TIME = 10  # seconds
+DEFAULT_nOVERLAPS_ALERT = 10
+DEFAULT_nRUNNING_ALERT = 5
+DEFAULT_ASTOR_STOPWAIT = 3  # seconds
+DEFAULT_ASTOR_nSTOPS = 3
 #----- PROTECTED REGION END -----#	//	CameraMonitor.additionnal_import
 
 ## Device States Description
@@ -92,7 +96,6 @@ class CameraMonitor (PyTango.Device_4Impl):
         status = "%s%s\n"%(msg,current)
         self.set_status(status)
         self.push_change_event('Status',status)
-        # self.mailto("Status update", status)
         if important and not current in self._important_logs:
             self._important_logs.append(current)
 
@@ -187,10 +190,10 @@ class CameraMonitor (PyTango.Device_4Impl):
                                             PyTango.EventType.CHANGE_EVENT,
                                             self)
         except Exception,e:
-            self.debug_stream("In %s::subscribe_event(%s,%s) CANNOT subscribe"
+            self.error_stream("In %s::subscribe_event(%s,%s) CANNOT subscribe"
                               %(self.get_name(),devProxy.dev_name(),attrName))
-            #self.debug_stream("In %s::subscribe_event(%s,%s) Exception %s"
-            #                  %(self.get_name(),devProxy.dev_name(),attrName,e))
+            self.debug_stream("In %s::subscribe_event(%s,%s) Exception %s"
+                              %(self.get_name(),devProxy.dev_name(),attrName,e))
             self._checkDevice(devProxy.dev_name())
         return None
 
@@ -221,27 +224,36 @@ class CameraMonitor (PyTango.Device_4Impl):
         #self.debug_stream("In %s::fireEventsList()"%self.get_name())
         #@todo: add the value on the push_event
         timestamp = time.time()
+        attrNames = []
         for attrEvent in eventsAttrList:
             try:
-                self.debug_stream("In %s::fireEventsList() attribute: %s, value: %s"
-                                  %(self.get_name(),attrEvent[0],str(attrEvent[1])))
-                if attrEvent[0] in ['CyclicBuffer'] and\
-                   not self.attr_emitCyclicBuffer_read:
-                    self.debug_stream("In %s::fireEventsList() attribute: %s "\
-                                      "avoided to emit the event duo to flag."
-                                      %(self.get_name(),attrEvent[0]))
+                attrName = attrEvent[0]
+                attrValue = attrEvent[1]
+                attrNames.append(attrName)
+                self.debug_stream("In %s::fireEventsList() attribute: %s, "
+                                  "value: %s" % (self.get_name(), attrName,
+                                                 str(attrValue)))
+                if attrName in ['CyclicBuffer'] and\
+                        not self.attr_emitCyclicBuffer_read:
+                    self.debug_stream("In %s::fireEventsList() attribute: %s "
+                                      "avoided to emit the event due to flag."
+                                      % (self.get_name(), attrName))
+                    attrQuality = None
                 elif len(attrEvent) == 3:#specifies quality
-                    self.push_change_event(attrEvent[0],attrEvent[1],
-                                           timestamp,attrEvent[2])
+                    attrQuality = attrEvent[2]
                 else:
-                    self.push_change_event(attrEvent[0],attrEvent[1],
-                                           timestamp,PyTango.AttrQuality.ATTR_VALID)
+                    attrQuality = PyTango.AttrQuality.ATTR_VALID
+                if attrQuality:
+                    self.push_change_event(attrName,attrValue,
+                                           timestamp,attrQuality)
             except Exception,e:
-                self.error_stream("In %s::fireEventsList() Exception "\
+                self.error_stream("In %s::fireEventsList() Exception "
                                   "with attribute %s"
-                                  %(self.get_name(),attrEvent[0]))
+                                  % (self.get_name(), attrEvent[0]))
                 print e
-        return
+        if len(attrNames) > 0:
+            self.info_stream("In %s::fireEventsList() emitted %d events: %s"
+                             % (self.get_name(), len(attrNames), attrNames))
     #---- Done events region
     ########################
 
@@ -250,51 +262,78 @@ class CameraMonitor (PyTango.Device_4Impl):
     def createThread(self):
         self.debug_stream("In %s::createThread()"%self.get_name())
         try:
+            self._recheckLoopOverlaps = 0
             self._joinerEvent = threading.Event()#to communicate between threads
             self._joinerEvent.clear()
             self._thread = threading.Thread(target=self.recheckThread)
             self._thread.setDaemon(True)
             self._thread.start()
-            self.debug_stream("In %s::createThread(): Thread created."%self.get_name())
+            self.info_stream("In %s::createThread(): recheck thread created."
+                             % (self.get_name()))
         except Exception,e:
-            self.warn_stream("In %s::createThread(): Exception creating thread: %s."%(self.get_name(),e))
+            self.warn_stream("In %s::createThread(): Exception creating "
+                             "recheck thread: %s." % (self.get_name(), e))
             self.change_state(PyTango.DevState.FAULT)
-            self.addStatusMsg("Exception creating calculation thread.",important=True)
+            self.addStatusMsg("Exception creating calculation thread.",
+                              important=True)
             return False
         return True
 
     def deleteThread(self):
-        self.debug_stream("In %s::deleteThread(): Stoping acquisition threading."%self.get_name())
+        self.debug_stream("In %s::deleteThread(): Stopping threads."
+                          % (self.get_name()))
         if hasattr(self,'_joinerEvent'):
-            self.debug_stream("In %s::deleteThread(): sending join event."%self.get_name())
+            self.info_stream("In %s::deleteThread(): sending join event."
+                              % (self.get_name()))
             self._joinerEvent.set()
         if hasattr(self,'_thread'):
-            self.debug_stream("In %s::deleteThread(): Thread joining."%self.get_name())
-            self._thread.join(1)
+            self.debug_stream("In %s::deleteThread(): Thread joining."
+                              % (self.get_name()))
+            self._thread.join(1)  # one second timeout
             if self._thread.isAlive():
-                self.debug_stream("In %s::deleteThread(): Thread joined."%self.get_name())
+                self.warn_stream("In %s::deleteThread(): "
+                                 "Thread NOT joined yet."
+                                  % (self.get_name()))
 
     def recheckThread(self):
-        self.debug_stream("In %s::recheckThread(): Thread started."%self.get_name())
+        self.info_stream("In %s::recheckThread(): Thread started."
+                         % (self.get_name()))
         if not hasattr(self,'_joinerEvent'):
-            raise Exception("Not possible to start the loop because it have not end condition")
-        time.sleep(DEFAULT_RECHECK_TIME)#Wait until first check
+            raise Exception("Not possible to start the loop because "
+                            "it have not end condition")
+        time.sleep(DEFAULT_RECHECK_TIME)  # Wait until first check
         while not self._joinerEvent.isSet():
             t_0 = time.time()
-            self.debug_stream("In %s::recheckThread() check for the devices in %s"
-                              %(self.get_name(),self.CamerasDict.keys()))
+            self.info_stream("In %s::recheckThread() check for the devices "
+                              "in %s" % (self.get_name(),
+                                         self.CamerasDict.keys()))
             for devName in self.CamerasDict.keys():
                 self._checkDevice(devName)
             deltaT = time.time() - t_0
-            if deltaT<DEFAULT_RECHECK_TIME:#if it takes less than the recheck time
-                self.debug_stream("In %s::recheckThread() it have taken %6.3f "\
+            if deltaT < DEFAULT_RECHECK_TIME:
+                # if it takes less than the recheck time
+                self.debug_stream("In %s::recheckThread() it have taken %6.3f "
                                   "seconds (go sleep for %6.3f seconds)"
-                                  %(self.get_name(),deltaT,DEFAULT_RECHECK_TIME-deltaT))
+                                  % (self.get_name(), deltaT,
+                                     DEFAULT_RECHECK_TIME-deltaT))
+                self._recheckLoopOverlaps = 0
                 time.sleep(DEFAULT_RECHECK_TIME-deltaT)
             else:
-                self.debug_stream("In %s::recheckThread() it have taken %6.3f "\
-                                  "seconds. Over the loop time, no sleep."
-                                  %(self.get_name(),deltaT))
+                self._recheckLoopOverlaps += 1
+                if self._recheckLoopOverlaps % DEFAULT_nOVERLAPS_ALERT:
+                    self.warn_stream("In %s::recheckThread() it have taken "
+                                     "%6.3f seconds. Over the loop time, "
+                                     "no sleep." % (self.get_name(), deltaT))
+                else:
+                    self.warn_stream("In %s::recheckThread() it have taken "
+                                     "%6.3f seconds. Over the loop time, "
+                                     "but %d consecutive: forcing a sleep."
+                                     % (self.get_name(), deltaT,
+                                        self._recheckLoopOverlaps))
+                    self.mailto("Recheck overlaps", "There has been %d "
+                                "consecutive overlaps in the recheck thread"
+                                % (self._recheckLoopOverlaps))
+                    time.sleep(DEFAULT_RECHECK_TIME)
             if self.attr_HangedCameras_read > 0:
                 self.__tryRecoverFromHang()
         #TODO: unsubscribe to all the events subscribed
@@ -303,21 +342,22 @@ class CameraMonitor (PyTango.Device_4Impl):
     
     ###################
     #----# Check region
-    def _checkDevice(self,devName,newState=None):
-        '''This method is called to check is a camera is alive and/or its state.
-           Can be called when an event is received (then the camera is not hang),
-           or in a periodical check (when the camera can be hanged).
+    def _checkDevice(self, devName, newState=None):
+        '''This method is called to check is a camera is alive and/or its
+           state. Can be called when an event is received (then the camera
+           is not hang), or in a periodical check (when the camera can be
+           hanged).
         '''
         self.debug_stream("In %s::_checkDevice(%s)"
-                          %(self.get_name(),self.CamerasDict[devName]))
+                          % (self.get_name(), self.CamerasDict[devName]))
         #If its the first time that an state is collected:
-        if not self.CamerasDict[devName].has_key('state'):
+        if 'state' not in self.CamerasDict[devName]:
             self.CamerasDict[devName]['state'] = None
-            self.debug_stream("In %s::_checkDevice(%s) state key initialized."
+            self.debug_stream("In %s::_checkDevice(%s) state key initialised."
                               %(self.get_name(),self.CamerasDict[devName]))
         #Camera could be hand only is no event is received and this call comes
         #from the periodical check
-        if newState==None:
+        if newState == None:
             if self.__isCameraHanged(devName):
                 if self.__isCameraInRunningList(devName):
                     self.__removeRunning(devName)
@@ -326,14 +366,16 @@ class CameraMonitor (PyTango.Device_4Impl):
                 if not self.__isCameraInHangedList(devName):
                     self.__appendHanged(devName)
                 self.debug_stream("In %s::_checkDevice(%s) device is hang."
-                                  %(self.get_name(),self.CamerasDict[devName]))
+                                  % (self.get_name(),
+                                     self.CamerasDict[devName]))
             elif self.__isCameraInHangedList(devName):
                 self.__removeHanged(devName)
         elif self.CamerasDict[devName]['state'] != newState:
             #only if the state have change
             if self.__isCameraRunning(devName):
                 self.debug_stream("In %s::_checkDevice(%s) device is running."
-                                  %(self.get_name(),self.CamerasDict[devName]))
+                                  % (self.get_name(),
+                                     self.CamerasDict[devName]))
                 if not self.__isCameraInRunningList(devName):
                     self.__appendRunning(devName)
                 if self.__isCameraInFaultList(devName):
@@ -342,7 +384,8 @@ class CameraMonitor (PyTango.Device_4Impl):
                     self.__removeHanged(devName)
             elif self.__isCameraInFault(devName):
                 self.debug_stream("In %s::_checkDevice(%s) device is in fault."
-                                  %(self.get_name(),self.CamerasDict[devName]))
+                                  % (self.get_name(),
+                                     self.CamerasDict[devName]))
                 if self.__isCameraInRunningList(devName):
                     self.__removeRunning(devName)
                 if not self.__isCameraInFaultList(devName):
@@ -351,7 +394,8 @@ class CameraMonitor (PyTango.Device_4Impl):
                     self.__removeHanged(devName)
             else:
                 self.debug_stream("In %s::_checkDevice(%s) device is in %s."
-                                  %(self.get_name(),self.CamerasDict[devName],newState))
+                                  % (self.get_name(),
+                                     self.CamerasDict[devName],newState))
                 if self.__isCameraInRunningList(devName):
                     self.__removeRunning(devName)
                 if self.__isCameraInFaultList(devName):
@@ -366,104 +410,118 @@ class CameraMonitor (PyTango.Device_4Impl):
                           %(self.get_name(),self.CamerasDict[devName]))
         #in case the the new state is the same than the older, nothing to do.
 
-    def __hasCameraChangeStateTo(self,devName,state):
-        if self.CamerasDict[devName].has_key('state'):
-            if self.CamerasDict[devName]['state'] != state:
-                try:
-                    if self.CamerasDict[devName]['device'].state() == state:
-                        return True
-                except:
-                    return False
-        return False
-
-    def __hasCameraChangeStateFrom(self,devName,state):
-        if self.CamerasDict[devName].has_key('state'):
-            if self.CamerasDict[devName]['state'] == state:
-                try:
-                    if self.CamerasDict[devName]['device'].state() != state:
-                        return True
-                except:
-                    return False
-        return False
+#     def __hasCameraChangeStateTo(self,devName,state):
+#         if 'state' in self.CamerasDict[devName]:
+#             if self.CamerasDict[devName]['state'] != state:
+#                 try:
+#                     if self.CamerasDict[devName]['device'].state() == state:
+#                         return True
+#                 except:
+#                     return False
+#         return False
+# 
+#     def __hasCameraChangeStateFrom(self,devName,state):
+#         if 'state' in self.CamerasDict[devName]:
+#             if self.CamerasDict[devName]['state'] == state:
+#                 try:
+#                     if self.CamerasDict[devName]['device'].state() != state:
+#                         return True
+#                 except:
+#                     return False
+#         return False
 
     #####################
     #----## check running
     def __isCameraRunning(self,devName):
         try:
-            isRunning = self.CamerasDict[devName]['device'].state() == PyTango.DevState.RUNNING
-            self.debug_stream("In %s::__isCameraRunning() device is running: %s"
-                              %(self.get_name(),str(isRunning)))
+            devState = self.CamerasDict[devName]['device'].state()
+            isRunning = devState == PyTango.DevState.RUNNING
+            self.debug_stream("In %s::__isCameraRunning() device %s is "
+                              "running: %s" % (self.get_name(), devName,
+                                               str(isRunning)))
             return isRunning
-        except:
-            self.debug_stream("In %s::__isCameraRunning() device is running: "\
-                              "False (cannot get state)"%(self.get_name()))
+        except Exception as e:
+            self.warn_stream("In %s::__isCameraRunning() Exception checking "
+                             "if device %s is running: %s"
+                             %(self.get_name(), devName, e))
+            traceback.print_exc()
             return False
 
     def __isCameraInRunningList(self,devName):
         try:
             i = self.attr_RunningCamerasList_read.index(devName)
-            self.debug_stream("In %s::__isCameraInRunningList() device is in "\
-                              "running list: i=%d"%(self.get_name(),i))
+            self.debug_stream("In %s::__isCameraInRunningList() device %s "
+                              "is in the running list: %d position."
+                              % (self.get_name(), devName, i))
             return True
         except:
-            self.debug_stream("In %s::__isCameraInRunningList() device is NOT "\
-                              "in running list"%(self.get_name()))
+            self.debug_stream("In %s::__isCameraInRunningList() device %s NOT "
+                              "found in running list"
+                              % (self.get_name(), devName))
             return False
 
-    def __cameraStopRunning(self,devName):
-        return self.__hasCameraChangeStateFrom(devName,PyTango.DevState.RUNNING)
-
-    def __cameraStartRunning(self,devName):
-        return self.__hasCameraChangeStateTo(devName,PyTango.DevState.RUNNING)
+#     def __cameraHasStopRunning(self,devName):
+#         return self.__hasCameraChangeStateFrom(devName,
+#                                                PyTango.DevState.RUNNING)
+# 
+#     def __cameraHasStartRunning(self,devName):
+#         return self.__hasCameraChangeStateTo(devName, PyTango.DevState.RUNNING)
 
     def __appendRunning(self,devName):
         try:
-            self.attr_RunningCamerasList_read.index(devName)
+            i = self.attr_RunningCamerasList_read.index(devName)
         except:
-            #if there is an exception, is because the device is not in the list
+            # if there is an exception, it is not in the list
             self.attr_RunningCamerasList_read.append(devName)
-            self.debug_stream("In %s::__appendRunning() append a device "\
-                              "in the running list"%(self.get_name()))
+            self.info_stream("In %s::__appendRunning() append %s device "
+                             "in the running list" % (self.get_name(),
+                                                      devName))
         else:
-            #in case that the device is in the list
-            self.warn_stream("In %s::__appendRunning() try append a device "\
-                              "that already was in the running list"%(self.get_name()))
+            # in case that the device is in the list
+            self.warn_stream("In %s::__appendRunning() try append %s device "
+                             "when it was already in the running list: "
+                             "%d position." % (self.get_name(), devName, i))
         if self.__runningListChanges():
-            self.debug_stream("In %s::__appendRunning() append event "\
-                              "from the running list"%(self.get_name()))
+            self.debug_stream("In %s::__appendRunning() append event "
+                              "from the running list" % (self.get_name()))
 
     def __removeRunning(self,devName):
         try:
             i = self.attr_RunningCamerasList_read.index(devName)
-        except:#index exception if it wasn't on the list
-            self.error_stream("In %s::__removeRunning() try to remove a device "\
-                              "that wasn't in the running list"%(self.get_name()))
-            return#without exception
+        except:
+            # index exception if it wasn't on the list
+            self.error_stream("In %s::__removeRunning() try to remove %s "
+                              "device when it wasn't in the running list"
+                              % (self.get_name(), devName))
+            return  # without exception
         self.attr_RunningCamerasList_read.pop(i)
-        self.debug_stream("In %s::__removeRunning() removed a device "\
-                          "from the running list"%(self.get_name()))
+        self.debug_stream("In %s::__removeRunning() removed %s device "
+                          "from the running list" % (self.get_name(), devName))
         if self.__runningListChanges():
-            self.debug_stream("In %s::__removeRunning() remove event "\
-                              "from the running list"%(self.get_name()))
-
+            self.debug_stream("In %s::__removeRunning() remove event "
+                              "from the running list" % (self.get_name()))
 
     def __runningListChanges(self):
-        if self.attr_RunningCameras_read != len(self.attr_RunningCamerasList_read):
-            self.debug_stream("In %s::__runningListChanges() running list have "\
-                              "changed"%(self.get_name()))
-            self.attr_RunningCameras_read = len(self.attr_RunningCamerasList_read)
+        if self.attr_RunningCameras_read != \
+                len(self.attr_RunningCamerasList_read):
+            self.debug_stream("In %s::__runningListChanges() running list "
+                              "have changed" % (self.get_name()))
+            self.attr_RunningCameras_read = \
+                len(self.attr_RunningCamerasList_read)
             self.fireEventsList([['RunningCameras',
                                   self.attr_RunningCameras_read],
                                  ['RunningCamerasList',
                                   self.attr_RunningCamerasList_read]])
-            self.mailto("Running Cameras", "There are %d running cameras: %s"
-                        % (self.attr_RunningCameras_read,
-                           self.attr_RunningCamerasList_read))
+            if self.attr_RunningCameras_read >= DEFAULT_nRUNNING_ALERT:
+                self.mailto("Running Cameras",
+                            "There are %d running cameras: %s"
+                            % (self.attr_RunningCameras_read,
+                               self.attr_RunningCamerasList_read))
             return True
-        self.debug_stream("In %s::__runningListChanges() running list have "\
-                          "NOT change: %d=%d"%(self.get_name(),
-                                               self.attr_RunningCameras_read,
-                                               len(self.attr_RunningCamerasList_read)))
+        self.debug_stream("In %s::__runningListChanges() running list have "
+                          "NOT change: %d = %d"
+                          %(self.get_name(), self.attr_RunningCameras_read,
+                            len(self.attr_RunningCamerasList_read)))
         return False
     #----Done check running
     #######################
@@ -478,66 +536,69 @@ class CameraMonitor (PyTango.Device_4Impl):
                               "fault: %s" % (self.get_name(), devName,
                                              str(isFault)))
             return isFault
-        except:
-            self.debug_stream("In %s::__isCameraInFault() device is in fault: "\
-                              "False (cannot get state)"%(self.get_name()))
+        except Exception as e:
+            self.warn_stream("In %s::__isCameraInFault() Exception checking "
+                             "if device %s is in fault: %s"
+                             %(self.get_name(), devName, e))
             traceback.print_exc()
             return False
 
     def __isCameraInFaultList(self,devName):
         try:
             i = self.attr_FaultCamerasList_read.index(devName)
-            self.debug_stream("In %s::__isCameraInFaultList() device %s is "\
-                              "in fault list: i=%d"
+            self.debug_stream("In %s::__isCameraInFaultList() device %s is "
+                              "in fault list: %d position."
                               % (self.get_name(), devName, i))
             return True
         except:
-            self.debug_stream("In %s::__isCameraInFaultList() device %s is "\
-                              "NOT in fault list"%(self.get_name(), devName))
+            self.debug_stream("In %s::__isCameraInFaultList() device %s NOT "
+                              "found in fault list"
+                              % (self.get_name(), devName))
             return False
 
-    def __cameraRecoverFault(self,devName):
-        self.__hasCameraChangeStateFrom(devName,PyTango.DevState.FAULT)
-
-    def __cameraDecayFault(self,devName):
-        return self.__hasCameraChangeStateTo(devName,PyTango.DevState.FAULT)
+#     def __cameraHasRecoverFromFault(self,devName):
+#         self.__hasCameraChangeStateFrom(devName, PyTango.DevState.FAULT)
+# 
+#     def __cameraHasDecayToFault(self,devName):
+#         return self.__hasCameraChangeStateTo(devName, PyTango.DevState.FAULT)
 
     def __appendFault(self,devName):
         try:
-            self.attr_FaultCamerasList_read.index(devName)
+            i = self.attr_FaultCamerasList_read.index(devName)
         except:
-            #if there is an exception, is because the device is not in the list
+            # if there is an exception, it is not in the list
             self.attr_FaultCamerasList_read.append(devName)
-            self.debug_stream("In %s::__appendFault() append %s device "\
-                              "in the fault list"%(self.get_name(), devName))
+            self.debug_stream("In %s::__appendFault() append %s device "
+                              "in the fault list" % (self.get_name(), devName))
         else:
-            #in case that the device is in the list
-            self.warn_stream("In %s::__appendFault() try append %s device "\
-                              "that already was in the fault list"
-                              % (self.get_name(), devName))
+            # in case that the device is in the list
+            self.warn_stream("In %s::__appendFault() try append %s device "
+                             "when it was already in the fault list: "
+                             "%d position" % (self.get_name(), devName, i))
         if self.__faultListChanges():
-            self.debug_stream("In %s::__appendFault() append event "\
-                              "from the fault list"%(self.get_name()))
+            self.debug_stream("In %s::__appendFault() append event "
+                              "from the fault list" % (self.get_name()))
 
     def __removeFault(self,devName):
         try:
             i = self.attr_FaultCamerasList_read.index(devName)
-        except:#index exception if it wasn't on the list
-            self.error_stream("In %s::__removeFault() try to remove %s device "\
-                              "that wasn't in the fault list"
+        except:
+            # index exception if it wasn't on the list
+            self.error_stream("In %s::__removeFault() try to remove %s device "
+                              "when it wasn't in the fault list"
                               % (self.get_name(), devName))
-            return#without exception
+            return  # without exception
         self.attr_FaultCamerasList_read.pop(i)
-        self.debug_stream("In %s::__removeFault() removed %s device "\
-                          "from the fault list"%(self.get_name(), devName))
+        self.debug_stream("In %s::__removeFault() removed %s device "
+                          "from the fault list" % (self.get_name(), devName))
         if self.__faultListChanges():
-            self.debug_stream("In %s::__removeFault() removed event "\
-                              "from the fault list"%(self.get_name()))
+            self.debug_stream("In %s::__removeFault() removed event "
+                              "from the fault list" % (self.get_name()))
 
     def __faultListChanges(self):
         if self.attr_FaultCameras_read != len(self.attr_FaultCamerasList_read):
-            self.debug_stream("In %s::__faultListChanges() fault list have "\
-                              "changed"%(self.get_name()))
+            self.debug_stream("In %s::__faultListChanges() fault list have "
+                              "changed" % (self.get_name()))
             self.attr_FaultCameras_read = len(self.attr_FaultCamerasList_read)
             self.fireEventsList([['FaultCameras',
                                   self.attr_FaultCameras_read],
@@ -549,109 +610,134 @@ class CameraMonitor (PyTango.Device_4Impl):
             if self.attr_FaultCameras_read > 0:
                 self.__tryRecoverFromFault()
             return True
-        self.debug_stream("In %s::__faultListChanges() fault list have "\
-                          "NOT change: %d=%d"%(self.get_name(),
-                                               self.attr_FaultCameras_read,
-                                               len(self.attr_FaultCamerasList_read)))
+        self.debug_stream("In %s::__faultListChanges() fault list have "
+                          "NOT change: %d=%d"
+                          % (self.get_name(), self.attr_FaultCameras_read,
+                             len(self.attr_FaultCamerasList_read)))
         return False
 
     def __tryRecoverFromFault(self):
         if self.TryFaultRecover:
             cameras = copy(self.attr_FaultCamerasList_read)
+            if len(cameras) > 0:
+                self.info_stream("In %s::__tryRecoverFromFault() "
+                                 "%d cameras to recover" % (self.get_name(),
+                                                            len(cameras)))
             errors = {}
             for camera in cameras:
                 try:
-                    self.debug_stream("In %s::__faultListChanges() "
+                    self.debug_stream("In %s::__tryRecoverFromFault() "
                                       "call Init() for %s"
                                       % (self.get_name(), camera))
-                    PyTango.DeviceProxy(camera).Init()
+                    self.CamerasDict[device]['device'].Init()
                 except exception as e:
                     if camera not in errors:
                         errors[camera] = []
                     errors[camera].append(e)
-            mailBody = "Applied the recovery from Fault procedure.\n"
-            mailBody = "%s\nAffected cameras are: %s" % (mailBody, cameras)
-            if len(errors) != 0:
-                mailBody("%s\nEncoutered exceptions during the process:\n%s"
-                         % (mailBody, errors))
-            mailBody = "%s\n--\nEnd transmission." % (mailBody)
-            self.mailto("Recovery from Fault", mailBody)
+            try:
+                mailBody = "Applied the recovery from Fault procedure.\n"
+                mailBody = "%s\nAffected cameras are: %s" % (mailBody, cameras)
+                if len(errors) != 0:
+                    mailBody("%s\nEncoutered exceptions during the process:\n%s"
+                             % (mailBody, errors))
+                mailBody = "%s\n--\nEnd transmission." % (mailBody)
+                self.mailto("Recovery from Fault", mailBody)
+            except Exception as e:
+                self.error_stream("In %s::__tryRecoverFromFault() "
+                                  "Exception to send email: %s"
+                                  % (self.get_name(), e))
     #---- Done Check fault
     ######################
 
     ##################
     #----## check hang
     def __isCameraHanged(self,devName):
-        try:
-            self.CamerasDict[devName]['device'].state()
-        except:
-            self.debug_stream("In %s::__isCameraHanged() device %s is hang: "
-                              "True (cannot get state)"
-                              % (self.get_name(), devName))
-            return True
-        self.debug_stream("In %s::__isCameraHanged() device %s is hang: "\
-                          "False (cannot get state)"%(self.get_name(), devName))
+        for i in range(2):
+            # hang retries to avoid to raise an alert
+            # with transient corba timeouts.
+            if not self.__tryStateRequest(devName):
+                return True
         return False
+
+    def __tryStateRequest(self, devName):
+        try:
+            state = self.CamerasDict[devName]['device'].state()
+        except Exception as e:
+            self.warn_stream("In %s::__tryStateRequest() "
+                             "cannot get the %s state"
+                             % (self.get_name(), devName))
+            return False
+        else:
+            self.debug_stream("In %s::__tryStateRequest() "
+                             "%s state is %s"
+                             % (self.get_name(), devName, state))
+            return True
 
     def __isCameraInHangedList(self,devName):
         try:
             i = self.attr_HangedCamerasList_read.index(devName)
-            self.debug_stream("In %s::__isCameraInHangedList() device %s is in "\
-                              "hang list: i=%d"%(self.get_name(),devName, i))
+            self.debug_stream("In %s::__isCameraInHangedList() device %s is "
+                              "in hang list: %d position."
+                              % (self.get_name(), devName, i))
             return True
         except:
-            self.debug_stream("In %s::__isCameraInHangedList() device %s is NOT "\
-                              "in hang list"%(self.get_name(), devName))
+            self.debug_stream("In %s::__isCameraInHangedList() device %s NOT "
+                              "found in hang list"
+                              % (self.get_name(), devName))
             return False
 
-    def __wasCameraHung(self,devName):
-        if self.CamerasDict[devName].has_key('eventId'):
-            return self.CamerasDict[devName]['eventId'] == None
-        return True
-
-    def __cameraHungRecovered(self):
-        eventId = self.subscribe_event(self.CamerasDict[devName]['device'],
-                                       "State")
-        self.CamerasDict[devName]['eventId'] = eventId
-        return eventId != None
+#     def __wasCameraHung(self,devName):
+#         if 'eventId' in self.CamerasDict[devName]:
+#             return self.CamerasDict[devName]['eventId'] == None
+#         return True
+# 
+#     def __cameraHungRecovered(self):
+#         eventId = self.subscribe_event(self.CamerasDict[devName]['device'],
+#                                        "State")
+#         self.CamerasDict[devName]['eventId'] = eventId
+#         return eventId != None
 
     def __appendHanged(self,devName):
         try:
-            self.attr_HangedCamerasList_read.index(devName)
+            i = self.attr_HangedCamerasList_read.index(devName)
         except:
-            #if there is an exception, is because the device is not in the list
+            # if there is an exception, it is not in the list
             self.attr_HangedCamerasList_read.append(devName)
-            self.debug_stream("In %s::__appendHanged() append %s device "\
-                              "in the hanged list"%(self.get_name(), devName))
+            self.debug_stream("In %s::__appendHanged() append %s device "
+                              "in the hanged list" % (self.get_name(),
+                                                      devName))
         else:
-            #in case that the device is in the list
-            self.error_stream("In %s::__appendHanged() try append %s device "\
-                              "that already was in the hanged list"
-                              % (self.get_name(), devName))
+            # in case that the device is in the list
+            self.warn_stream("In %s::__appendHanged() try append %s device "
+                              "when if was already in the hanged list:"
+                              "%d position" % (self.get_name(), devName, i))
         if self.__hangedListChanges():
-            self.debug_stream("In %s::__appendHanged() append event "\
-                              "from the hanged list"%(self.get_name()))
+            self.debug_stream("In %s::__appendHanged() append event "
+                              "from the hanged list" % (self.get_name()))
 
     def __removeHanged(self,devName):
         try:
             i = self.attr_HangedCamerasList_read.index(devName)
-        except:#index exception if it wasn't on the list
-            self.warn_stream("In %s::__removeHanged() try to remove %s device "
-                              "that wasn't in the hanged list"
+        except:
+            # index exception if it wasn't on the list
+            self.error_stream("In %s::__removeHanged() try to remove %s "
+                              "device when it wasn't in the hanged list"
                               % (self.get_name(), devName))
-            return#without exception
+            return  # without exception
         self.attr_HangedCamerasList_read.pop(i)
-        self.debug_stream("In %s::__removeHanged() removed %s device "\
-                          "from the hanged list"%(self.get_name(), devName))
+        self.debug_stream("In %s::__removeHanged() removed %s device "
+                          "from the hanged list" % (self.get_name(), devName))
         if self.__hangedListChanges():
-            self.debug_stream("In %s::__removeHanged() removed event "\
+            self.debug_stream("In %s::__removeHanged() removed event "
                               "from the hanged list"%(self.get_name()))
 
     def __hangedListChanges(self):
-        if self.attr_HangedCameras_read != len(self.attr_HangedCamerasList_read):
-            self.debug_stream("In %s::__hangedListChanges() hand list have "\
-                              "changed"%(self.get_name()))
-            self.attr_HangedCameras_read = len(self.attr_HangedCamerasList_read)
+        if self.attr_HangedCameras_read != \
+                len(self.attr_HangedCamerasList_read):
+            self.debug_stream("In %s::__hangedListChanges() hand list have "
+                              "changed" % (self.get_name()))
+            self.attr_HangedCameras_read = \
+                len(self.attr_HangedCamerasList_read)
             self.fireEventsList([['HangedCameras',
                                   self.attr_HangedCameras_read],
                                  ['HangedCamerasList',
@@ -662,15 +748,19 @@ class CameraMonitor (PyTango.Device_4Impl):
             if self.attr_HangedCameras_read > 0:
                 self.__tryRecoverFromHang()
             return True
-        self.debug_stream("In %s::__hangedListChanges() hang list have "\
-                          "NOT change: %d=%d"%(self.get_name(),
-                                               self.attr_HangedCameras_read,
-                                               len(self.attr_HangedCamerasList_read)))
+        self.debug_stream("In %s::__hangedListChanges() hang list have "
+                          "NOT change: %d=%d"
+                          % (self.get_name(), self.attr_HangedCameras_read,
+                             len(self.attr_HangedCamerasList_read)))
         return False
 
     def __tryRecoverFromHang(self):
         if self.TryHangRecover and Astor is not None:
             cameras = copy(self.attr_HangedCamerasList_read)
+            if len(cameras) > 0:
+                self.info_stream("In %s::__tryRecoverFromHang() "
+                                 "%d cameras to recover" % (self.get_name(),
+                                                            len(cameras)))
             instances = []
             errors = {}
             astor = Astor()
@@ -680,24 +770,45 @@ class CameraMonitor (PyTango.Device_4Impl):
                     if instance is not None:
                         i = 0
                         while astor.stop_servers(instance):
-                            self.debug_stream("Stopping %s instance (%d)"
-                                              % (instance, i))
-                            time.sleep(1)
+                            self.debug_stream("In %s::__tryRecoverFromHang() "
+                                              "Stopping %s instance (%d)"
+                                              % (self.get_name(), instance, i))
+                            time.sleep(DEFAULT_ASTOR_STOPWAIT)
+                            if i == DEFAULT_ASTOR_nSTOPS:
+                                break
+                        self.info_stream("In %s::__tryRecoverFromHang() "
+                                         "Stopped %s instance (tries %d)"
+                                         % (self.get_name(), instance, i))
                         instances.append(instance)
                     else:
-                        raise Exception("Astor didn't solve the device server")
+                        raise Exception("Astor didn't solve the "
+                                        "device server instance")
                 except Exception as e:
                     if camera not in errors:
                         errors[camera] = []
                     errors[camera].append(e)
-            astor.start_servers(instances)
-            mailBody = "Applied the recovery from Hang procedure.\n"
-            mailBody = "%s\nAffected instances are: %s" % (mailBody, instances)
-            if len(errors) != 0:
-                mailBody = "%s\nEncoutered exceptions during the process:\n%s"\
-                           % (mailBody, errors)
-            mailBody = "%s\n--\nEnd transmission." % (mailBody)
-            self.mailto("Recovery from Hang", mailBody)
+            try:
+                if astor.start_servers(instances):
+                    self.info_stream("In %s::__tryRecoverFromHang() "
+                                     "Started all instances: %s"
+                                     % (self.get_name(), instances))
+            except Exception as e:
+                self.error_stream("In %s::__tryRecoverFromHang() "
+                                  "Exception starting all instances: %s"
+                                  % (self.get_name(), instances, e))
+            try:
+                mailBody = "Applied the recovery from Hang procedure.\n"
+                mailBody = "%s\nAffected instances are: %s"\
+                    % (mailBody, instances)
+                if len(errors) != 0:
+                    mailBody = "%s\nEncoutered exceptions during the "\
+                        "process:\n%s" % (mailBody, errors)
+                mailBody = "%s\n--\nEnd transmission." % (mailBody)
+                self.mailto("Recovery from Hang", mailBody)
+            except Exception as e:
+                self.error_stream("In %s::__tryRecoverFromHang() "
+                                  "Exception to send email: %s"
+                                  % (self.get_name(), e))
     #---- Done check hang
     #####################
 
