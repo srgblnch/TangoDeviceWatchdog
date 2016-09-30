@@ -8,7 +8,7 @@ else
     VERBOSE=$2
 fi
 
-DNAME=CameraMonitor
+DNAME=Watchdog
 
 #python $SICILIA/ds/python/$DNAME/$DNAME.py $1 $VERBOSE
 screen -dm -S $DNAME-$1 -h 1000 python $SICILIA/ds/python/$DNAME/$DNAME.py $1 $VERBOSE
