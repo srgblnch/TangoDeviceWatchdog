@@ -22,6 +22,8 @@ __copyright__ = "Copyright 2016 CELLS/Alba synchrotron"
 __license__ = "GPLv3+"
 __status__ = "development"
 
+__all__ = ["Logger", "Dog", "WatchdogTester", "main"]
+__docformat__ = 'restructuredtext'
 
 try:
     from fandango import Astor  # soft dependency
@@ -64,6 +66,7 @@ class Logger(object):
         self.removeFromHang = parent.removeFromHang
         # --- mailto
         self.mailto = parent.mailto
+
 
 class Dog(Logger):
     def __init__(self, devName, joinerEvent=None, *args, **kwargs):
@@ -158,6 +161,17 @@ class Dog(Logger):
         self.info_stream("Subscribed to %s/State (id=%d)"
                          % (self.devName, self._eventId))
 
+    def __unsubscribe_event(self):
+        if self._eventId:
+            try:
+                self._devProxy.unsubscribe_event(self._eventId)
+            except Exception as e:
+                self.error_stream("%s failed to unsubscribe event: %s"
+                                  % (self.devName, e))
+            self._eventId = None
+        else:
+            self.warn_stream("%s no event id to unsubscribe." % (self.devName))
+
     def __createThread(self):
         try:
             self._thread = Thread(target=self.__hangMonitorThread)
@@ -172,22 +186,22 @@ class Dog(Logger):
 
     def push_event(self, event):
         try:
-            if event == None:
+            if event is None:
                 return
-            if event.attr_value == None or event.attr_value.value == None:
-                self.debug_stream("%s push_event() %s: value has None type"
-                                  %(self.devName, event.attr_name))
+            if event.attr_value is None or event.attr_value.value is None:
+                # self.debug_stream("%s push_event() %s: value has None type"
+                #                   %(self.devName, event.attr_name))
                 return
-            #----FIXME: Ugly!!
-            bar = event.attr_name.rsplit('/',4)[1:4]
-            devName = "%s/%s/%s"%(bar[0],bar[1],bar[2])
-            #----
+            # ---FIXME: Ugly!!
+            bar = event.attr_name.rsplit('/', 4)[1:4]
+            devName = "%s/%s/%s" % (bar[0], bar[1], bar[2])
+            # ---
             self.debug_stream("%s push_event() value = %s"
-                              %(self.devName,event.attr_value.value))
+                              % (self.devName, event.attr_value.value))
             self.__checkDeviceState(event.attr_value.value)
-        except Exception,e:
+        except Exception as e:
             self.debug_stream("%s push_event() Exception %s"
-                              %(self.devName, e))
+                              % (self.devName, e))
             traceback.print_exc()
 
     # --- checks
@@ -206,7 +220,16 @@ class Dog(Logger):
                 self.removeFromRunning(self.devName)
             elif self.__wasInFault():
                 self.removeFromFault(self.devName)
+            # recover from Hang
+            if self.devState is None:
+                self.debug_stream("%s received state information after hang, "
+                                  "remove from the list."
+                                  % (self.devName))
+                if self.isInHangLst(self.devName):
+                    self.removeFromHang(self.devName)
             self._devState = newState
+            self.debug_stream("%s store newer state %s"
+                              % (self.devName, self.devState))
         # else: nothing change, nothing to do.
 
     def __stateHasChange(self, newState):
@@ -236,20 +259,27 @@ class Dog(Logger):
         if state == DevState.FAULT and self.tryFaultRecovery:
             self.__faultRecoveryProcedure()
         if not state:
-            if self.isInHangLst(self.devName):
+            if not self.isInHangLst(self.devName):
+                self.debug_stream("%s no state information." % (self.devName))
+                self.__unsubscribe_event()
                 self.appendToHang(self.devName)
-            if self.isInRunningLst(self.devName):
+            elif self.isInRunningLst(self.devName):
                 self.removeFromRunning(self.devName)
             elif self.isInFaultLst(self.devName):
                 self.removeFromFault(self.devName)
             if self.devState is None and self.tryHangRecovery:
+                self.debug_stream("%s not state information by a second try."
+                                  % (self.devName))
                 # force to launch the recover after a second loop
                 self.__hangRecoveryProcedure()
             self._devState = None
         elif self.devState is None:
+            self.debug_stream("%s gives state information, back from hang."
+                              % (self.devName))
+            if self.isInHangLst(self.devName):
+                self.removeFromHang(self.devName)
             self._devState = state
             self.__buildProxy()
-            self.removeFromHang(self.devName)
 
     def __stateRequest(self):
         try:
@@ -306,7 +336,7 @@ class Dog(Logger):
             if not instance:
                 raise Exception("Astor didn't solve the "
                                 "device server instance (%s)" % instance)
-            if not self.__forceStopInstance(astor, instance):
+            if not self.__forceRestartInstance(astor, instance):
                 self.error_stream("%s Astor cannot recover" % (self.devName))
         except Exception as e:
             self.error_stream("%s __hangRecoveryProcedure() Exception %s"
@@ -323,7 +353,7 @@ class Dog(Logger):
         mailBody = "%s\n--\nEnd transmission." % (mailBody)
         self.mailto("Recovery from Hang", mailBody)
 
-    def __forceStopInstance(self, astor, instance):
+    def __forceRestartInstance(self, astor, instance):
         for i in range(DEFAULT_ASTOR_nSTOPS):
             res = astor.stop_servers([instance])
             if res:
@@ -419,11 +449,13 @@ def main():
     from optparse import OptionParser
     import signal
     import sys
+
     def signal_handler(signal, frame):
         print('\nYou pressed Ctrl+C!\n')
         sys.exit(0)
+
     parser = OptionParser()
-    parser.add_option('', "--devices", 
+    parser.add_option('', "--devices",
                       help="List of device names to provide to the tester")
     (options, args) = parser.parse_args()
     if options.devices:
