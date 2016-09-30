@@ -90,9 +90,9 @@ class Dog(Logger):
         return "Dog(%s, state=%s)" % (self.devName, self.devState)
 
     def __repr__(self):
-        return "Dog(%s,state=%s, event=%d, faultRecovery=%s, hangRecovery=%s)"\
-            % (self.devName, self.devState, self._eventId,
-               self.tryFaultRecovery, self.tryHangRecovery)
+        return "Dog(%s, state=%s, faultRecovery=%s, hangRecovery=%s)"\
+            % (self.devName, self.devState, self.tryFaultRecovery,
+               self.tryHangRecovery)
 
     # --- object properties
 
