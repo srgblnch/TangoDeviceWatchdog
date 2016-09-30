@@ -65,9 +65,9 @@ class Logger(object):
         # --- mailto
         self.mailto = parent.mailto
 
-class MonitorObj(Logger):
+class Dog(Logger):
     def __init__(self, devName, joinerEvent=None, *args, **kwargs):
-        super(MonitorObj, self).__init__(*args, **kwargs)
+        super(Dog, self).__init__(*args, **kwargs)
         self._devName = devName
         self._devProxy = None
         self._eventId = None
@@ -83,6 +83,14 @@ class MonitorObj(Logger):
         self._overlapsAlert = DEFAULT_nOVERLAPS_ALERT
         self.__createThread()
 
+    def __str__(self):
+        return "Dog(%s, state=%s)" % (self.devName, self.devState)
+
+    def __repr__(self):
+        return "Dog(%s,state=%s, event=%d, faultRecovery=%s, hangRecovery=%s)"\
+            % (self.devName, self.devState, self._eventId,
+               self.tryFaultRecovery, self.tryHangRecovery)
+
     # --- object properties
 
     @property
@@ -92,6 +100,10 @@ class MonitorObj(Logger):
     @property
     def devProxy(self):
         return self._devProxy
+
+    @property
+    def devState(self):
+        return self._devState
 
     @property
     def tryFaultRecovery(self):
@@ -198,13 +210,13 @@ class MonitorObj(Logger):
         # else: nothing change, nothing to do.
 
     def __stateHasChange(self, newState):
-        return newState != self._devState
+        return newState != self.devState
 
     def __wasRunning(self):
-        return self._devState == DevState.RUNNING
+        return self.devState == DevState.RUNNING
 
     def __wasInFault(self):
-        return self._devState == DevState.FAULT
+        return self.devState == DevState.FAULT
 
     # --- threading
 
@@ -230,11 +242,11 @@ class MonitorObj(Logger):
                 self.removeFromRunning(self.devName)
             elif self.isInFaultLst(self.devName):
                 self.removeFromFault(self.devName)
-            if self._devState is None and self.tryHangRecovery:
+            if self.devState is None and self.tryHangRecovery:
                 # force to launch the recover after a second loop
                 self.__hangRecoveryProcedure()
             self._devState = None
-        elif self._devState is None:
+        elif self.devState is None:
             self._devState = state
             self.__buildProxy()
             self.removeFromHang(self.devName)
@@ -321,18 +333,18 @@ class MonitorObj(Logger):
         return astor.start_servers([instance])
 
 
-class MonitorObjTester(object):
+class WatchdogTester(object):
     def __init__(self, deviceLst, joinerEvent, *args, **kwargs):
-        super(MonitorObjTester, self).__init__(*args, **kwargs)
+        super(WatchdogTester, self).__init__(*args, **kwargs)
         self._monitorsLst = []
         self._runningLst = []
         self._faultLst = []
         self._hangLst = []
         for deviceName in deviceLst:
-            monitor = MonitorObj(deviceName, joinerEvent, self)
-            monitor.tryFaultRecovery = True
-            monitor.tryHangRecovery = True
-            self._monitorsLst.append(monitor)
+            dog = Dog(deviceName, joinerEvent, self)
+            dog.tryFaultRecovery = True
+            dog.tryHangRecovery = True
+            self._monitorsLst.append(dog)
 
     def error_stream(self, msg):
         print("ERROR:\t%s" % msg)
@@ -419,7 +431,7 @@ def main():
         print("\n\tPress Ctrl+C to finish\n")
         joinerEvent = Event()
         joinerEvent.clear()
-        tester = MonitorObjTester(options.devices.split(','), joinerEvent)
+        tester = WatchdogTester(options.devices.split(','), joinerEvent)
         signal.pause()
         del tester
 
