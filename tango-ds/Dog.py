@@ -42,6 +42,7 @@ DEFAULT_RECHECK_TIME = 180.0  # seconds
 DEFAULT_nOVERLAPS_ALERT = 10
 DEFAULT_ASTOR_nSTOPS = 2
 DEFAULT_ASTOR_STOPWAIT = 3  # seconds
+DEFAULT_MAILSPACE = 10
 
 
 class Logger(object):
@@ -77,7 +78,9 @@ class Dog(Logger):
         self._eventId = None
         self._devState = None
         self._tryFaultRecovery = False
+        self._faultCtr = 0
         self._tryHangRecovery = False
+        self._hangCtr = 0
         self.__buildProxy()
         # --- Thread for hang monitoring
         self._joinerEvent = joinerEvent
@@ -330,13 +333,16 @@ class Dog(Logger):
         else:
             self.info_stream("%s Init() completed" % (self.devName))
             e = None
-        mailBody = "Applied the recovery from Fault procedure.\n"
-        mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
-        if e:
-            mailBody("%s\nEncoutered exceptions during the process:\n%s"
-                     % (mailBody, e))
-        mailBody = "%s\n--\nEnd transmission." % (mailBody)
-        self.mailto("Recovery from Fault", mailBody)
+        if self._faultCtr % DEFAULT_MAILSPACE == 1:
+            mailBody = "Applied the recovery from Fault procedure.\n"
+            mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
+            if e:
+                mailBody("%s\nEncoutered exceptions during the process:\n%s"
+                         % (mailBody, e))
+            mailBody = "%s\n--\nEnd transmission." % (mailBody)
+            
+            self.mailto("Recovery from Fault", mailBody)
+        self._faultCtr += 1
 
     def __hangRecoveryProcedure(self):
         try:
@@ -352,15 +358,17 @@ class Dog(Logger):
                               % (self.devName, e))
         else:
             e = None
-        mailBody = "Applied the recovery from Hang procedure.\n"
-        mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
-        if instance:
-            mailBody = "%s (instance: %s)" % (mailBody, instance)
-        if e:
-            mailBody = "%s\nEncoutered exceptions during the rocess:\n%s"\
-                % (mailBody, errors)
-        mailBody = "%s\n--\nEnd transmission." % (mailBody)
-        self.mailto("Recovery from Hang", mailBody)
+        if self._hangCtr % DEFAULT_MAILSPACE == 1:
+            mailBody = "Applied the recovery from Hang procedure.\n"
+            mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
+            if instance:
+                mailBody = "%s (instance: %s)" % (mailBody, instance)
+            if e:
+                mailBody = "%s\nEncoutered exceptions during the rocess:\n%s"\
+                    % (mailBody, errors)
+            mailBody = "%s\n--\nEnd transmission." % (mailBody)
+            self.mailto("Recovery from Hang", mailBody)
+        self._hangCtr += 1
 
     def __forceRestartInstance(self, astor, instance):
         for i in range(DEFAULT_ASTOR_nSTOPS):
