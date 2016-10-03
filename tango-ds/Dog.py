@@ -77,10 +77,13 @@ class Dog(Logger):
         self._devProxy = None
         self._eventId = None
         self._devState = None
+        # --- fault vbles
         self._tryFaultRecovery = False
-        self._faultCtr = 0
+        self._faultRecoveryCtr = 0
+        self._devStatus = None
+        # --- hangVbles
         self._tryHangRecovery = False
-        self._hangCtr = 0
+        self._hangRecoveryCtr = 0
         self.__buildProxy()
         # --- Thread for hang monitoring
         self._joinerEvent = joinerEvent
@@ -227,6 +230,7 @@ class Dog(Logger):
                 self.removeFromRunning(self.devName)
             elif self.__wasInFault():
                 self.removeFromFault(self.devName)
+                self._faultRecoveryCtr = 0
             # recover from Hang
             if self.devState is None:
                 self.debug_stream("%s received state information after hang, "
@@ -234,6 +238,7 @@ class Dog(Logger):
                                   % (self.devName))
                 if self.isInHangLst(self.devName):
                     self.removeFromHang(self.devName)
+                    self._hangRecoveryCtr = 0
             self._devState = newState
             self.debug_stream("%s store newer state %s"
                               % (self.devName, self.devState))
@@ -273,6 +278,7 @@ class Dog(Logger):
                 self.removeFromRunning(self.devName)
             elif self.isInFaultLst(self.devName):
                 self.removeFromFault(self.devName)
+                self._faultRecoveryCtr = 0
             if self.devState is None and self.tryHangRecovery:
                 self.debug_stream("%s not state information by a second try."
                                   % (self.devName))
@@ -286,6 +292,7 @@ class Dog(Logger):
                               % (self.devName))
             if self.isInHangLst(self.devName):
                 self.removeFromHang(self.devName)
+                self._hangRecoveryCtr = 0
             self._devState = state
             self.__buildProxy()
 
@@ -321,8 +328,10 @@ class Dog(Logger):
                 sleep(self._recheckPeriod)
 
     def __faultRecoveryProcedure(self):
+        statusMsg = None
         try:
             if self._devProxy:
+                statusMsg = self._devProxy.status()
                 self._devProxy.Init()
             else:
                 self.warn_stream("%s no proxy to command Init()"
@@ -333,16 +342,21 @@ class Dog(Logger):
         else:
             self.info_stream("%s Init() completed" % (self.devName))
             e = None
-        if self._faultCtr % DEFAULT_MAILSPACE == 1:
-            mailBody = "Applied the recovery from Fault procedure.\n"
+        if self._faultRecoveryCtr % DEFAULT_MAILSPACE == 0:
+            mailBody = "Applied the recovery from Fault procedure. (%d)\n"\
+                % (self._faultRecoveryCtr)
             mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
             if e:
-                mailBody("%s\nEncoutered exceptions during the process:\n%s"
-                         % (mailBody, e))
+                mailBody = "%s\nEncoutered exceptions during the process:\n%s"\
+                           % (mailBody, e)
+            if statusMsg:
+                mailBody = "%s status before the Init(): %s"\
+                    % (mailBody, statusMsg)
+                self._devStatus = statusMsg
             mailBody = "%s\n--\nEnd transmission." % (mailBody)
             
             self.mailto("Recovery from Fault", mailBody)
-        self._faultCtr += 1
+        self._faultRecoveryCtr += 1
 
     def __hangRecoveryProcedure(self):
         try:
@@ -358,8 +372,9 @@ class Dog(Logger):
                               % (self.devName, e))
         else:
             e = None
-        if self._hangCtr % DEFAULT_MAILSPACE == 1:
-            mailBody = "Applied the recovery from Hang procedure.\n"
+        if self._hangRecoveryCtr % DEFAULT_MAILSPACE == 0:
+            mailBody = "Applied the recovery from Hang procedure (%d).\n"\
+                % (self._hangRecoveryCtr)
             mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
             if instance:
                 mailBody = "%s (instance: %s)" % (mailBody, instance)
@@ -368,7 +383,7 @@ class Dog(Logger):
                     % (mailBody, errors)
             mailBody = "%s\n--\nEnd transmission." % (mailBody)
             self.mailto("Recovery from Hang", mailBody)
-        self._hangCtr += 1
+        self._hangRecoveryCtr += 1
 
     def __forceRestartInstance(self, astor, instance):
         for i in range(DEFAULT_ASTOR_nSTOPS):
