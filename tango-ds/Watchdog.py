@@ -29,14 +29,14 @@ __all__ = ["Watchdog", "WatchdogClass", "main"]
 __docformat__ = 'restructuredtext'
 
 
-from Dog import Dog
+from Dog import Dog, DEFAULT_RECHECK_TIME
 import email.mime.text
 import PyTango
 import smtplib
 from socket import gethostname
 import sys
 from threading import Event
-from time import time
+from time import time, sleep
 import traceback
 from types import StringType
 
@@ -84,18 +84,14 @@ class Watchdog(PyTango.Device_4Impl):
            to convert it in the expected dictionary and do all the state
            event subscriptions.
         '''
-        self.info_stream("In %s::_processDevicesListProperty() DevicesList = "
-                         "%r" % (self.get_name(), self.DevicesList))
+        allDevices = []
         for i in range(len(self.DevicesList)):
             subline = self.DevicesList[i].split(',')
             for j in range(len(subline)):
                 if len(subline[j]) > 0:
                     try:
                         devName = subline[j].lower()
-                        dog = Dog(devName, self._joinerEvent, self)
-                        dog.tryFaultRecovery = self.TryFaultRecover
-                        dog.tryHangRecovery = self.TryHangRecover
-                        self.DevicesDict[devName] = dog
+                        allDevices.append(devName)
                     except Exception as e:
                         errMsg = "In %s::_processDevicesListProperty() "\
                                  "Exception in DevicesList processing: "\
@@ -103,6 +99,28 @@ class Watchdog(PyTango.Device_4Impl):
                                  % (self.get_name(), i, j, str(e))
                         self.error_stream(errMsg)
                         traceback.print_exc()
+        timeSeparation = DEFAULT_RECHECK_TIME/len(allDevices)
+        self.info_stream("In %s::_processDevicesListProperty() %d in elements "
+                         "(%g time separation) DevicesList = %r"
+                         % (self.get_name(), len(allDevices), timeSeparation,
+                            allDevices))
+        
+        for i,devName in enumerate(allDevices):
+            try:
+                startDelay = timeSeparation*i
+                self.info_stream("for %d:%s there will be a delay of %g"
+                                 % (i, devName, startDelay))
+                dog = Dog(devName, self._joinerEvent, startDelay, self)
+                dog.tryFaultRecovery = self.TryFaultRecover
+                dog.tryHangRecovery = self.TryHangRecover
+                self.DevicesDict[devName] = dog
+            except Exception as e:
+                errMsg = "In %s::_processDevicesListProperty() "\
+                         "Exception in Dogs generation: "\
+                         "%d:%s, exception: %s"\
+                         % (self.get_name(), i, devName, str(e))
+                self.error_stream(errMsg)
+                traceback.print_exc()
         # per each of those cameras
         for devName in self.DevicesDict.keys():
             dynAttrName = "%s_State" % (devName.replace("/", "_"))

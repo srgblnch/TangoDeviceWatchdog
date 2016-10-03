@@ -38,7 +38,7 @@ from threading import Thread, Event
 import traceback
 
 
-DEFAULT_RECHECK_TIME = 60  # seconds
+DEFAULT_RECHECK_TIME = 180.0  # seconds
 DEFAULT_nOVERLAPS_ALERT = 10
 DEFAULT_ASTOR_nSTOPS = 2
 DEFAULT_ASTOR_STOPWAIT = 3  # seconds
@@ -69,7 +69,8 @@ class Logger(object):
 
 
 class Dog(Logger):
-    def __init__(self, devName, joinerEvent=None, *args, **kwargs):
+    def __init__(self, devName, joinerEvent=None, startDelay=None,
+                 *args, **kwargs):
         super(Dog, self).__init__(*args, **kwargs)
         self._devName = devName
         self._devProxy = None
@@ -84,7 +85,7 @@ class Dog(Logger):
         self._recheckPeriod = DEFAULT_RECHECK_TIME
         self._overlaps = 0
         self._overlapsAlert = DEFAULT_nOVERLAPS_ALERT
-        self.__createThread()
+        self.__createThread(startDelay)
 
     def __str__(self):
         return "Dog(%s, state=%s)" % (self.devName, self.devState)
@@ -172,10 +173,13 @@ class Dog(Logger):
         else:
             self.warn_stream("%s no event id to unsubscribe." % (self.devName))
 
-    def __createThread(self):
+    def __createThread(self, startDelay):
         try:
             self._thread = Thread(target=self.__hangMonitorThread)
             self._thread.setDaemon(True)
+            self.info_stream("%s wait %g to launch monitor thread"
+                             % (self.devName, startDelay))
+            sleep(startDelay)
             self._thread.start()
         except Exception as e:
             self.error_stream("%s hang monitor thread creation fail: %s"
@@ -244,6 +248,7 @@ class Dog(Logger):
     # --- threading
 
     def __hangMonitorThread(self):
+        self.info_stream("%s launch background monitor" % (self.devName))
         sleep(self._recheckPeriod)
         while not self._joinerEvent.isSet():
             t_0 = time()
