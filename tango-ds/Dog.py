@@ -261,8 +261,6 @@ class Dog(Logger):
             if state:
                 self.info_stream("%s respond state %s" % (self.devName, state))
                 break
-        if state == DevState.FAULT and self.tryFaultRecovery:
-            self.__faultRecoveryProcedure()
         if not state:
             if not self.isInHangLst(self.devName):
                 self.debug_stream("%s no state information." % (self.devName))
@@ -278,6 +276,8 @@ class Dog(Logger):
                 # force to launch the recover after a second loop
                 self.__hangRecoveryProcedure()
             self._devState = None
+        elif state == DevState.FAULT and self.tryFaultRecovery:
+            self.__faultRecoveryProcedure()
         elif self.devState is None:
             self.debug_stream("%s gives state information, back from hang."
                               % (self.devName))
@@ -319,7 +319,11 @@ class Dog(Logger):
 
     def __faultRecoveryProcedure(self):
         try:
-            self._devProxy.Init()
+            if self._devProxy:
+                self._devProxy.Init()
+            else:
+                self.warn_stream("%s no proxy to command Init()"
+                                 % (self.devName))
         except Exception as e:
             self.error_stream("%s in Fault recovery procedure Exception: %s"
                               % (self.devName, e))
