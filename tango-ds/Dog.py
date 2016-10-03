@@ -175,11 +175,11 @@ class Dog(Logger):
 
     def __createThread(self, startDelay):
         try:
-            self._thread = Thread(target=self.__hangMonitorThread)
+            self._thread = Thread(target=self.__hangMonitorThread,
+                                  args=(startDelay,))
             self._thread.setDaemon(True)
             self.info_stream("%s wait %g to launch monitor thread"
                              % (self.devName, startDelay))
-            sleep(startDelay)
             self._thread.start()
         except Exception as e:
             self.error_stream("%s hang monitor thread creation fail: %s"
@@ -247,9 +247,9 @@ class Dog(Logger):
 
     # --- threading
 
-    def __hangMonitorThread(self):
+    def __hangMonitorThread(self, startDelay):
+        sleep(startDelay)
         self.info_stream("%s launch background monitor" % (self.devName))
-        sleep(self._recheckPeriod)
         while not self._joinerEvent.isSet():
             t_0 = time()
             self.__manualCheck()
