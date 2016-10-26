@@ -50,7 +50,7 @@ from types import StringType
 
 class Watchdog(PyTango.Device_4Impl):
     ##################
-    # ---# Logs region
+    # # Logs region ---
     def cleanAllImportantLogs(self):
         # @todo: clean the important logs when they loose importance.
         self.debug_stream("In %s::cleanAllImportantLogs()" % (self.get_name()))
@@ -74,11 +74,11 @@ class Watchdog(PyTango.Device_4Impl):
         self.set_state(newstate)
         self.push_change_event('State', newstate)
         self.cleanAllImportantLogs()
-    # --- Done Logs region
+    # Done Logs region ---
     ######################
 
     #########################
-    # ---# Process Properties
+    # # Process Properties ---
     def _processDevicesListProperty(self):
         '''This method works with the raw input in the property DevicesList
            to convert it in the expected dictionary and do all the state
@@ -101,15 +101,14 @@ class Watchdog(PyTango.Device_4Impl):
                         traceback.print_exc()
         timeSeparation = DEFAULT_RECHECK_TIME/len(allDevices)
         self.info_stream("In %s::_processDevicesListProperty() %d in elements "
-                         "(%g time separation) DevicesList = %r"
+                         "(%g seconds time separation) DevicesList = %r"
                          % (self.get_name(), len(allDevices), timeSeparation,
                             allDevices))
-        
-        for i,devName in enumerate(allDevices):
+        for i, devName in enumerate(allDevices):
             try:
                 startDelay = timeSeparation*i
-                self.info_stream("for %d:%s there will be a delay of %g"
-                                 % (i, devName, startDelay))
+                self.info_stream("for %dth device %s there will be a delay "
+                                 "of %g seconds" % (i, devName, startDelay))
                 dog = Dog(devName, self._joinerEvent, startDelay, self)
                 dog.tryFaultRecovery = self.TryFaultRecover
                 dog.tryHangRecovery = self.TryHangRecover
@@ -133,11 +132,11 @@ class Watchdog(PyTango.Device_4Impl):
                                is_allo_meth=Watchdog.is_oneDeviceState_allowed)
             self.debug_stream("In %s::processDevicesList() add dyn_attr %s"
                               % (self.get_name(), dynAttrName))
-    # --- Done Process Properties
+    # Done Process Properties ---
     #############################
 
     ######################
-    # ---# dyn_attr region
+    # # dyn_attr region ---
     def read_oneDeviceState(self, attr):
         self.debug_stream("In %s::read_oneDeviceState()" % (self.get_name()))
         devName = attr.get_name().replace("--", "/")
@@ -164,11 +163,11 @@ class Watchdog(PyTango.Device_4Impl):
     #       - allow to adjust the recheck period for each of the watched
     #       - report threshold for running devices
 
-    # --- Done dyn_attr region
+    # Done dyn_attr region ---
     ##########################
 
     ####################
-    # ---# events region
+    # # events region ---
     def fireEventsList(self, eventsAttrList):
         timestamp = time()
         attrNames = []
@@ -202,11 +201,11 @@ class Watchdog(PyTango.Device_4Impl):
         if len(attrNames) > 0:
             self.info_stream("In %s::fireEventsList() emitted %d events: %s"
                              % (self.get_name(), len(attrNames), attrNames))
-    # --- Done events region
+    # Done events region ---
     ########################
 
     ################
-    # --- Dog region
+    # Dog region ---
     def isInRunningLst(self, who):
         return self.isInLst(self.attr_RunningDevicesList_read, who)
 
@@ -220,10 +219,13 @@ class Watchdog(PyTango.Device_4Impl):
             self.fireRunningAttrEvents()
 
     def fireRunningAttrEvents(self):
-        self.attr_RunningDevices_read = len(self.attr_RunningDevicesList_read)
-        self.fireEventsList([["RunningDevices", self.attr_RunningDevices_read],
-                             ["RunningDevicesList",
-                              self.attr_RunningDevicesList_read]])
+        devLst = self.attr_RunningDevicesList_read[:]
+        howManyNow = len(devLst)
+        if self.attr_RunningDevices_read != howManyNow:
+            self.attr_RunningDevices_read = howManyNow
+            self._report("RUNNING", howManyNow, devLst)
+        self.fireEventsList([["RunningDevices", howManyNow],
+                             ["RunningDevicesList", devLst]])
 
     def isInFaultLst(self, who):
         return self.isInLst(self.attr_FaultDevicesList_read, who)
@@ -237,10 +239,13 @@ class Watchdog(PyTango.Device_4Impl):
             self.fireFaultAttrEvents()
 
     def fireFaultAttrEvents(self):
-        self.attr_FaultDevices_read = len(self.attr_FaultDevicesList_read)
-        self.fireEventsList([["FaultDevices", self.attr_FaultDevices_read],
-                             ["FaultDevicesList",
-                              self.attr_FaultDevicesList_read]])
+        devLst = self.attr_FaultDevicesList_read[:]
+        howManyNow = len(devLst)
+        if self.attr_FaultDevices_read != howManyNow:
+            self.attr_FaultDevices_read = howManyNow
+            self._report("FAULT", howManyNow, devLst)
+        self.fireEventsList([["FaultDevices", howManyNow],
+                             ["FaultDevicesList", devLst]])
 
     def isInHangLst(self, who):
         return self.isInLst(self.attr_HangDevicesList_read, who)
@@ -254,10 +259,13 @@ class Watchdog(PyTango.Device_4Impl):
             self.fireHangAttrEvents()
 
     def fireHangAttrEvents(self):
-        self.attr_HangDevices_read = len(self.attr_HangDevicesList_read)
-        self.fireEventsList([["HangDevices", self.attr_HangDevices_read],
-                             ["HangDevicesList",
-                              self.attr_HangDevicesList_read]])
+        devLst = self.attr_HangDevicesList_read
+        howManyNow = len(devLst)
+        if self.attr_HangDevices_read != howManyNow:
+            self.attr_HangDevices_read = howManyNow
+            self._report("HANG", howManyNow, devLst)
+        self.fireEventsList([["HangDevices", howManyNow],
+                             ["HangDevicesList", devLst]])
 
     def isInLst(self, lst, who):
         return lst.count(who)
@@ -290,7 +298,17 @@ class Watchdog(PyTango.Device_4Impl):
             s = smtplib.SMTP('localhost')
             s.sendmail(mail['From'], self.MailTo, mail.as_string())
             s.quit()
-    # --- Done dog region
+            self.debug_stream("Email sent... (%s)" % (mail['To']))
+
+    def _report(self, action, howmany, lst):
+        subject = "Watchdog %s report" % action
+        mailBody = "Status Report from the watchdog %s\n"\
+            % (self.get_name())
+        mailBody = "%s%s devices change to %d\n%s"\
+            % (mailBody, action, howmany, lst)
+        mailBody = "%s\n--\nEnd transmission." % (mailBody)
+        self.mailto(subject, mailBody)
+    # Done dog region ---
     #####################
 
     def __init__(self, cl, name):

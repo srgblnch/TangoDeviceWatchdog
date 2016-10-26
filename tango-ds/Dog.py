@@ -42,7 +42,6 @@ DEFAULT_RECHECK_TIME = 180.0  # seconds
 DEFAULT_nOVERLAPS_ALERT = 10
 DEFAULT_ASTOR_nSTOPS = 2
 DEFAULT_ASTOR_STOPWAIT = 3  # seconds
-DEFAULT_MAILSPACE = 10
 
 
 class Logger(object):
@@ -184,8 +183,12 @@ class Dog(Logger):
             self._thread = Thread(target=self.__hangMonitorThread,
                                   args=(startDelay,))
             self._thread.setDaemon(True)
-            self.info_stream("%s wait %g to launch monitor thread"
-                             % (self.devName, startDelay))
+            if startDelay > 0:
+                self.info_stream("Monitor %s will wait %g seconds until "
+                                 "thread start" % (self.devName, startDelay))
+            else:
+                self.info_stream("Monitor %s will start the thread "
+                                 "immediately" % (self.devName))
             self._thread.start()
         except Exception as e:
             self.error_stream("%s hang monitor thread creation fail: %s"
@@ -198,13 +201,19 @@ class Dog(Logger):
         try:
             if event is None:
                 return
-            if event.attr_value is None or event.attr_value.value is None:
+            if not hasattr(event, 'attr_value') or event.attr_value is None \
+                    or event.attr_value.value is None:
                 # self.debug_stream("%s push_event() %s: value has None type"
                 #                   %(self.devName, event.attr_name))
                 return
             # ---FIXME: Ugly!!
             bar = event.attr_name.rsplit('/', 4)[1:4]
             devName = "%s/%s/%s" % (bar[0], bar[1], bar[2])
+            if devName != self.devName:
+                self.error_stream("event received doesn't correspond with "
+                                  "who the listener expects (%s != %s)"
+                                  % (devName, self.devName))
+                return
             # ---
             self.debug_stream("%s push_event() value = %s"
                               % (self.devName, event.attr_value.value))
@@ -233,10 +242,10 @@ class Dog(Logger):
                 self._faultRecoveryCtr = 0
             # recover from Hang
             if self.devState is None:
-                self.debug_stream("%s received state information after hang, "
-                                  "remove from the list."
-                                  % (self.devName))
                 if self.isInHangLst(self.devName):
+                    self.debug_stream("%s received state information after "
+                                      "hang, remove from the list."
+                                      % (self.devName))
                     self.removeFromHang(self.devName)
                     self._hangRecoveryCtr = 0
             self._devState = newState
@@ -256,7 +265,10 @@ class Dog(Logger):
     # --- threading
 
     def __hangMonitorThread(self, startDelay):
-        sleep(startDelay)
+        if startDelay > 0:
+            self.info_stream("%s watchdog build, wait %g until start"
+                             % (self.devName, startDelay))
+            sleep(startDelay)
         self.info_stream("%s launch background monitor" % (self.devName))
         while not self._joinerEvent.isSet():
             t_0 = time()
@@ -269,14 +281,15 @@ class Dog(Logger):
             if state:
                 self.info_stream("%s respond state %s" % (self.devName, state))
                 break
-        if not state:
+        if not state:  # no answer from the device
             if not self.isInHangLst(self.devName):
                 self.debug_stream("%s no state information." % (self.devName))
                 self.__unsubscribe_event()
                 self.appendToHang(self.devName)
-            elif self.isInRunningLst(self.devName):
+            # review any other list where it can be
+            if self.isInRunningLst(self.devName):
                 self.removeFromRunning(self.devName)
-            elif self.isInFaultLst(self.devName):
+            if self.isInFaultLst(self.devName):
                 self.removeFromFault(self.devName)
                 self._faultRecoveryCtr = 0
             if self.devState is None and self.tryHangRecovery:
@@ -285,16 +298,20 @@ class Dog(Logger):
                 # force to launch the recover after a second loop
                 self.__hangRecoveryProcedure()
             self._devState = None
-        elif state == DevState.FAULT and self.tryFaultRecovery:
-            self.__faultRecoveryProcedure()
-        elif self.devState is None:
-            self.debug_stream("%s gives state information, back from hang."
-                              % (self.devName))
-            if self.isInHangLst(self.devName):
-                self.removeFromHang(self.devName)
-                self._hangRecoveryCtr = 0
-            self._devState = state
-            self.__buildProxy()
+        else:
+            if self.devState is None:
+                self.debug_stream("%s gives state information, back from hang."
+                                  % (self.devName))
+                if self.isInHangLst(self.devName):
+                    self.removeFromHang(self.devName)
+                    self._hangRecoveryCtr = 0
+                self._devState = state
+                self.__buildProxy()
+            if state == DevState.FAULT and self.tryFaultRecovery:
+                self.__faultRecoveryProcedure()
+            if self.devState != state:
+                # state has change but hasn't been cached by events
+                self._devState = state
 
     def __stateRequest(self):
         try:
@@ -336,26 +353,13 @@ class Dog(Logger):
             else:
                 self.warn_stream("%s no proxy to command Init()"
                                  % (self.devName))
-        except Exception as e:
+        except Exception as exceptionObj:
             self.error_stream("%s in Fault recovery procedure Exception: %s"
                               % (self.devName, e))
         else:
             self.info_stream("%s Init() completed" % (self.devName))
-            e = None
-        if self._faultRecoveryCtr % DEFAULT_MAILSPACE == 0:
-            mailBody = "Applied the recovery from Fault procedure. (%d)\n"\
-                % (self._faultRecoveryCtr)
-            mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
-            if e:
-                mailBody = "%s\nEncoutered exceptions during the process:\n%s"\
-                           % (mailBody, e)
-            if statusMsg:
-                mailBody = "%s status before the Init(): %s"\
-                    % (mailBody, statusMsg)
-                self._devStatus = statusMsg
-            mailBody = "%s\n--\nEnd transmission." % (mailBody)
-            
-            self.mailto("Recovery from Fault", mailBody)
+            exceptionObj = None
+        self._reportFaultProcedure(exceptionObj, statusMsg)
         self._faultRecoveryCtr += 1
 
     def __hangRecoveryProcedure(self):
@@ -367,22 +371,12 @@ class Dog(Logger):
                                 "device server instance (%s)" % instance)
             if not self.__forceRestartInstance(astor, instance):
                 self.error_stream("%s Astor cannot recover" % (self.devName))
-        except Exception as e:
+        except Exception as exceptionObj:
             self.error_stream("%s __hangRecoveryProcedure() Exception %s"
-                              % (self.devName, e))
+                              % (self.devName, exceptionObj))
         else:
-            e = None
-        if self._hangRecoveryCtr % DEFAULT_MAILSPACE == 0:
-            mailBody = "Applied the recovery from Hang procedure (%d).\n"\
-                % (self._hangRecoveryCtr)
-            mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
-            if instance:
-                mailBody = "%s (instance: %s)" % (mailBody, instance)
-            if e:
-                mailBody = "%s\nEncoutered exceptions during the rocess:\n%s"\
-                    % (mailBody, errors)
-            mailBody = "%s\n--\nEnd transmission." % (mailBody)
-            self.mailto("Recovery from Hang", mailBody)
+            exceptionObj = None
+        self._reportHangProcedure(instance, exceptionObj)
         self._hangRecoveryCtr += 1
 
     def __forceRestartInstance(self, astor, instance):
@@ -393,6 +387,34 @@ class Dog(Logger):
             sleep(DEFAULT_ASTOR_STOPWAIT)
         self.info_stream("%s Astor start %s" % (self.devName, instance))
         return astor.start_servers([instance])
+
+    def _reportFaultProcedure(self, exceptionObj, statusMsg):
+        if self._faultRecoveryCtr == 0:
+            # only report when it has happen, no remainders
+            mailBody = "Applied the recovery from Fault procedure.\n"
+            mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
+            if exceptionObj:
+                mailBody = "%s\nEncoutered exceptions during the process:\n%s"\
+                           % (mailBody, exceptionObj)
+            if statusMsg:
+                mailBody = "%s\n\nStatus before the Init(): %s"\
+                    % (mailBody, statusMsg)
+                self._devStatus = statusMsg
+            mailBody = "%s\n--\nEnd transmission." % (mailBody)
+            self.mailto("Device in FAULT state", mailBody)
+
+    def _reportHangProcedure(self, instance, exceptionObj):
+        if self._hangRecoveryCtr == 0:
+            # only report when it has happen, no remainders
+            mailBody = "Applied the recovery from Hang procedure.\n"
+            mailBody = "%s\nAffected camera was: %s" % (mailBody, self.devName)
+            if instance:
+                mailBody = "%s (instance: %s)" % (mailBody, instance)
+            if exceptionObj:
+                mailBody = "%s\nEncoutered exceptions during the process:\n%s"\
+                    % (mailBody, exceptionObj)
+            mailBody = "%s\n--\nEnd transmission." % (mailBody)
+            self.mailto("Device HANG", mailBody)
 
 
 class WatchdogTester(object):
