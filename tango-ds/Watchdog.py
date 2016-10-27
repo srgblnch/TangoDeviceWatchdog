@@ -125,7 +125,7 @@ class Watchdog(PyTango.Device_4Impl):
                 traceback.print_exc()
         # per each of those cameras
         for devName in self.DevicesDict.keys():
-            dynAttrName = "%s_State" % (devName.replace("/", "_"))
+            dynAttrName = "%s__State" % (devName.replace("/", "__"))
             # Replace by an "impossible" symbol
             # --- FIXME: the separator would be improved
 #             dynAttr = PyTango.Attr(dynAttrName, PyTango.DevUShort,
@@ -145,7 +145,7 @@ class Watchdog(PyTango.Device_4Impl):
     def read_oneDeviceState(self, attr):
         self.debug_stream("In %s::read_oneDeviceState()" % (self.get_name()))
         try:
-            attrFullName = attr.get_name().replace("_", "/")
+            attrFullName = attr.get_name().replace("__", "/")
             devName, _ = attrFullName.rsplit('/', 1)
         except:
             self.error_stream("In %s::read_oneDeviceState() cannot extract "
@@ -308,7 +308,7 @@ class Watchdog(PyTango.Device_4Impl):
 
     def mailto(self, action, msg):
         if len(self.MailTo) != 0:
-            name = self.get_name()  # .replace('/', '_')
+            name = self.get_name()  # .replace('/', '__')
             mail = email.mime.text.MIMEText(msg)
             mail['From'] = "%s@%s" % (name, gethostname())
             mail['To'] = ', '.join(self.MailTo)
