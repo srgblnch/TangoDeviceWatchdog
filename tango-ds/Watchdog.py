@@ -35,10 +35,13 @@ import PyTango
 import smtplib
 from socket import gethostname
 import sys
-from threading import Event
-from time import time, sleep
+from threading import Thread, Event, Lock
+from time import ctime, sleep, time
 import traceback
 from types import StringType
+
+
+COLLECTION_REPORT_PERIOD = 3600  # 1h
 
 
 # # Device States Description:
@@ -125,7 +128,9 @@ class Watchdog(PyTango.Device_4Impl):
             dynAttrName = "%s_State" % (devName.replace("/", "_"))
             # Replace by an "impossible" symbol
             # --- FIXME: the separator would be improved
-            dynAttr = PyTango.Attr(dynAttrName, PyTango.DevUShort,
+#             dynAttr = PyTango.Attr(dynAttrName, PyTango.DevUShort,
+#                                    PyTango.READ)
+            dynAttr = PyTango.Attr(dynAttrName, PyTango.CmdArgType.DevState,
                                    PyTango.READ)
             # --- FIXME: Can the dynAttr be a DevState type?
             self.add_attribute(dynAttr, r_meth=Watchdog.read_oneDeviceState,
@@ -139,15 +144,28 @@ class Watchdog(PyTango.Device_4Impl):
     # # dyn_attr region ---
     def read_oneDeviceState(self, attr):
         self.debug_stream("In %s::read_oneDeviceState()" % (self.get_name()))
-        devName = attr.get_name().replace("--", "/")
+        try:
+            attrFullName = attr.get_name().replace("_", "/")
+            devName, _ = attrFullName.rsplit('/', 1)
+        except:
+            self.error_stream("In %s::read_oneDeviceState() cannot extract "
+                              "the name from %s"
+                              % (self.get_name(), attr.get_name()))
+            attr.set_value(PyTango.DevState.UNKNOWN)
+            return
         try:
             state = self.DevicesDict[devName].devState
+            if not state:
+                state = PyTango.DevState.UNKNOWN
             if state:
                 attr.set_value(state)
             else:
                 attr.set_value_date_quality(PyTango.DevState.UNKNOWN, time(),
                                             PyTango.AttrQuality.ATTR_INVALID)
-        except:
+        except Exception as e:
+            self.error_stream("In %s::read_oneDeviceState() Exception with "
+                              "%s reading the state: %s"
+                              % (self.get_name(), devName, e))
             attr.set_value(PyTango.DevState.UNKNOWN)
 
     def is_oneDeviceState_allowed(self, req_type):
@@ -223,7 +241,7 @@ class Watchdog(PyTango.Device_4Impl):
         howManyNow = len(devLst)
         if self.attr_RunningDevices_read != howManyNow:
             self.attr_RunningDevices_read = howManyNow
-            self._report("RUNNING", howManyNow, devLst)
+            self._collect("RUNNING", howManyNow, devLst)
         self.fireEventsList([["RunningDevices", howManyNow],
                              ["RunningDevicesList", devLst]])
 
@@ -308,6 +326,63 @@ class Watchdog(PyTango.Device_4Impl):
             % (mailBody, action, howmany, lst)
         mailBody = "%s\n--\nEnd transmission." % (mailBody)
         self.mailto(subject, mailBody)
+        self._collect(action, howmany, lst)
+
+    def _prepareCollectorThread(self):
+        if self._changesCollector is None:
+            self._changesCollector = Thread(target=self._collectionReporter)
+            self._changesCollector.setDaemon(True)
+            self._changesCollector.start()
+            self.debug_stream("Collector thread launched")
+
+    def _collect(self, action, howmany, lst):
+        try:
+            with self._changesCollectorLock:
+                if not action in self._changesDct:
+                    self._changesDct[action] = {}
+                now = ctime()
+                while now in self._changesDct[action]:
+                    now += "."  # if many in the same second, tag them
+                self._changesDct[action][now] = [howmany, lst]
+            self.debug_stream("Collected %s information: %d and %s"
+                              % (action, howmany, lst))
+        except Exception as e:
+            self.error_stream("Exception collecting %s information: %s"
+                              % (action, e))
+
+    def _collectionReporter(self):
+        self.debug_stream("Collector thread says hello")
+        lastCollection = time()
+        sleep(COLLECTION_REPORT_PERIOD)
+        subject = "Watchdog periodic report"
+        while not self._joinerEvent.isSet():
+            t0 = time()
+            try:
+                self.debug_stream("Collector thread starts reporting process")
+                avoidSend = True
+                mailBody = "Status Report from %s of watchdog %s\n\n"\
+                    % (ctime(lastCollection), self.get_name())
+                with self._changesCollectorLock:
+                    if len(self._changesDct.keys()) > 0:
+                        avoidSend = False
+                        for action in self._changesDct.keys():
+                            mailBody = "%sCollected events for action %s\n"\
+                                % (mailBody, action)
+                            for when in self._changesDct[action]:
+                                howmany, lst = self._changesDct[action][when]
+                                mailBody = "%s\tat %s: %d devices:\n\t\t%s\n"\
+                                    % (mailBody, when, howmany, lst)
+                    self._changesDct = {}
+                    lastCollection = time()
+                mailBody = "%s\n--\nEnd transmission." % (mailBody)
+                if not avoidSend:
+                    self.mailto(subject, mailBody)
+            except Exception as e:
+                self.error_stream("Exception reporting collected information"
+                                  ": %s" % (e))
+            t_diff = time()-t0
+            if not self._joinerEvent.isSet():
+                sleep(COLLECTION_REPORT_PERIOD-t_diff)
     # Done dog region ---
     #####################
 
@@ -353,6 +428,10 @@ class Watchdog(PyTango.Device_4Impl):
         # --- process properties
         self._joinerEvent = Event()
         self._joinerEvent.clear()
+        self._changesCollector = None
+        self._changesDct = {}
+        self._changesCollectorLock = Lock()
+        self._prepareCollectorThread()
         self._processDevicesListProperty()
         # everything ok:
         self.change_state(PyTango.DevState.ON)

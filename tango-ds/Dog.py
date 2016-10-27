@@ -401,7 +401,7 @@ class Dog(Logger):
                     % (mailBody, statusMsg)
                 self._devStatus = statusMsg
             mailBody = "%s\n--\nEnd transmission." % (mailBody)
-            self.mailto("Device in FAULT state", mailBody)
+            # self.mailto("Device in FAULT state", mailBody)
 
     def _reportHangProcedure(self, instance, exceptionObj):
         if self._hangRecoveryCtr == 0:
@@ -414,7 +414,7 @@ class Dog(Logger):
                 mailBody = "%s\nEncoutered exceptions during the process:\n%s"\
                     % (mailBody, exceptionObj)
             mailBody = "%s\n--\nEnd transmission." % (mailBody)
-            self.mailto("Device HANG", mailBody)
+            # self.mailto("Device HANG", mailBody)
 
 
 class WatchdogTester(object):
