@@ -32,7 +32,7 @@ except:
 import email.mime.text
 import smtplib
 from socket import gethostname
-from PyTango import DeviceProxy, DevState, EventType
+from PyTango import DeviceProxy, DevState, EventType, DevFailed
 from time import sleep, time
 from threading import Thread, Event
 import traceback
@@ -42,16 +42,20 @@ DEFAULT_RECHECK_TIME = 180.0  # seconds
 DEFAULT_nOVERLAPS_ALERT = 10
 DEFAULT_ASTOR_nSTOPS = 2
 DEFAULT_ASTOR_STOPWAIT = 3  # seconds
+SEPARATOR = "\\"
 
 
 class Logger(object):
     def __init__(self, parent, *args, **kwargs):
         super(Logger, self).__init__(*args, **kwargs)
         self._parent = parent
+        # --- tango streams
         self.error_stream = parent.error_stream
         self.warn_stream = parent.warn_stream
         self.info_stream = parent.info_stream
         self.debug_stream = parent.debug_stream
+        # --- tango event retransmission
+        self.fireEventsList = parent.fireEventsList
         # --- running
         self.isInRunningLst = parent.isInRunningLst
         self.appendToRunning = parent.appendToRunning
@@ -67,10 +71,24 @@ class Logger(object):
         # --- mailto
         self.mailto = parent.mailto
 
+    def fireEvent(self, attrName, value, timestamp=None, quality=None):
+        attrFullName = "%s%s%s"\
+            % (self.devName.replace("/", SEPARATOR), SEPARATOR, attrName)
+        try:
+            if timestamp and quality:
+                self.fireEventsList([[attrFullName, value, timestamp,
+                                      quality]])
+            else:
+                self.fireEventsList([[attrFullName, value]])
+        except Exception as e:
+            self.error_stream("Cannot fire event for %s/%s: %s"
+                              % (self.devName, attrName, e))
+            traceback.print_exc()
+
 
 class Dog(Logger):
     def __init__(self, devName, joinerEvent=None, startDelay=None,
-                 *args, **kwargs):
+                 extraAttrs=None, *args, **kwargs):
         super(Dog, self).__init__(*args, **kwargs)
         self._devName = devName
         self._devProxy = None
@@ -83,13 +101,23 @@ class Dog(Logger):
         # --- hangVbles
         self._tryHangRecovery = False
         self._hangRecoveryCtr = 0
-        self.__buildProxy()
         # --- Thread for hang monitoring
         self._joinerEvent = joinerEvent
         self._thread = None
         self._recheckPeriod = DEFAULT_RECHECK_TIME
         self._overlaps = 0
         self._overlapsAlert = DEFAULT_nOVERLAPS_ALERT
+        # --- extra attributes
+        self._extraAttributes = []
+        self._extraEventIds = {}
+        self._extraAttrValues = {}
+        for attrName in extraAttrs:
+            attrName= attrName.lower()
+            self._extraAttributes.append(attrName)
+            self._extraEventIds[attrName] = None
+            self._extraAttrValues[attrName] = None
+        # --- build proxy and event subscriptions
+        self.__buildProxy()
         self.__createThread(startDelay)
 
     def __str__(self):
@@ -113,6 +141,34 @@ class Dog(Logger):
     @property
     def devState(self):
         return self._devState
+
+    def getExtraAttr(self, attrName):
+        try:
+            value = self._devProxy[attrName].value
+            timestamp = self._devProxy[attrName].time.totime()
+            quality = self._devProxy[attrName].quality
+            if value != self._extraAttrValues[attrName]:
+                self.debug_stream("%s/%s has changed from %s to %s"
+                                  % (self.devName, attrName,
+                                     self._extraAttrValues[attrName], value))
+                self._extraAttrValues[attrName] = value
+                self.fireEvent(attrName, value, timestamp, quality)
+            return value
+        except DevFailed as e:
+            self.warn_stream("%s/%s read exception: %s"
+                              % (self.devName, attrName, e[0].desc))
+        except Exception as e:
+            self.error_stream("%s/%s read exception: %s"
+                              % (self.devName, attrName, e))
+            raise Exception("%s/%s cannot be read" % (self.devname, attrName))
+
+    def setExtraAttr(self, attrName, value):
+        try:
+            self._devProxy[attrName] = value
+        except Exception as e:
+            self.error_stream("%s/%s write exception: %s"
+                              % (self.devName, attrName, e))
+            raise Exception("%s/%s cannot be write" % (self.devname, attrName))
 
     @property
     def tryFaultRecovery(self):
@@ -166,6 +222,7 @@ class Dog(Logger):
                                            self)
         self.info_stream("Subscribed to %s/State (id=%d)"
                          % (self.devName, self._eventId))
+        self.__subscribe_extraAttrs()
 
     def __unsubscribe_event(self):
         if self._eventId:
@@ -177,6 +234,38 @@ class Dog(Logger):
             self._eventId = None
         else:
             self.warn_stream("%s no event id to unsubscribe." % (self.devName))
+        self.__unsubscribe_extraAttrs()
+
+    def __subscribe_extraAttrs(self):
+        for attrName in self._extraAttributes:
+            try:
+                self._extraEventIds[attrName] = \
+                    self._devProxy.subscribe_event(attrName,
+                                                   EventType.CHANGE_EVENT,
+                                                   self)
+                self.info_stream("Subscribed to %s/%s (id=%d)"
+                             % (self.devName, attrName,
+                                self._extraEventIds[attrName]))
+            except DevFailed as e:
+                self.warn_stream("%s/%s failed to subscribe event: %s"
+                                  % (self.devName, attrName, e[0].desc))
+            except Exception as e:
+                self.error_stream("%s/%s failed to subscribe event: %s"
+                                  % (self.devName, attrName, e))
+
+    def __unsubscribe_extraAttrs(self):
+        for attrName in self._extraEventIds.keys():
+            if self._extraEventIds[attrName]:
+                try:
+                    self._devProxy.\
+                        unsubscribe_event(self._extraEventIds[attrName])
+                except Exception as e:
+                    self.error_stream("%s/%s failed to unsubscribe event: %s"
+                                  % (self.devName, attrName, e))
+                self._extraEventIds[attrName] = None
+            else:
+                self.warn_stream("%s/%s no event id to unsubscribe."
+                                 % (self.devName, attrName))
 
     def __createThread(self, startDelay):
         try:
@@ -206,18 +295,32 @@ class Dog(Logger):
                 # self.debug_stream("%s push_event() %s: value has None type"
                 #                   %(self.devName, event.attr_name))
                 return
-            # ---FIXME: Ugly!!
-            bar = event.attr_name.rsplit('/', 4)[1:4]
-            devName = "%s/%s/%s" % (bar[0], bar[1], bar[2])
+            # ---FIXME: Ugly!! but it comes with a fullname
+            nameSplit = event.attr_name.rsplit('/', 4)[1:5]
+            domain, family, member, attrName = nameSplit
+            devName = "%s/%s/%s" % (domain, family, member)
+            attrName = attrName.lower()
             if devName != self.devName:
-                self.error_stream("event received doesn't correspond with "
+                self.error_stream("Event received doesn't correspond with "
                                   "who the listener expects (%s != %s)"
                                   % (devName, self.devName))
                 return
             # ---
-            self.debug_stream("%s push_event() value = %s"
-                              % (self.devName, event.attr_value.value))
-            self.__checkDeviceState(event.attr_value.value)
+            if attrName == 'state':
+                self.debug_stream("%s push_event() value = %s"
+                                  % (self.devName, event.attr_value.value))
+                self.__checkDeviceState(event.attr_value.value)
+                self.fireEvent('State', event.attr_value.value)
+            elif attrName in self._extraAttributes:
+                self.debug_stream("%s/%s push_event() value = %s"
+                                  % (self.devName, attrName,
+                                     event.attr_value.value))
+                self.fireEvent(attrName, event.attr_value.value)
+                self._extraAttrValues[attrName] = event.attr_value.value
+            else:
+                self.warn_stream("%s/%s push_event() unmanaged attribute "
+                                 "(value = %s)" % (self.devName, attrName,
+                                                   event.attr_value.value))
         except Exception as e:
             self.debug_stream("%s push_event() Exception %s"
                               % (self.devName, e))

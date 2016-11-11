@@ -29,7 +29,7 @@ __all__ = ["Watchdog", "WatchdogClass", "main"]
 __docformat__ = 'restructuredtext'
 
 
-from Dog import Dog, DEFAULT_RECHECK_TIME
+from Dog import Dog, DEFAULT_RECHECK_TIME, SEPARATOR
 import email.mime.text
 import PyTango
 import smtplib
@@ -41,7 +41,7 @@ import traceback
 from types import StringType
 
 
-COLLECTION_REPORT_PERIOD = 3600  # 1h
+COLLECTION_REPORT_PERIOD = 3600*24  # 1d
 
 
 # # Device States Description:
@@ -107,12 +107,14 @@ class Watchdog(PyTango.Device_4Impl):
                          "(%g seconds time separation) DevicesList = %r"
                          % (self.get_name(), len(allDevices), timeSeparation,
                             allDevices))
+        extraAttrs = self._prepare_ExtraAttrs()
         for i, devName in enumerate(allDevices):
             try:
                 startDelay = timeSeparation*i
-                self.info_stream("for %dth device %s there will be a delay "
-                                 "of %g seconds" % (i, devName, startDelay))
-                dog = Dog(devName, self._joinerEvent, startDelay, self)
+                self.info_stream("for %d. device %s there will be a delay "
+                                 "of %g seconds" % (i+1, devName, startDelay))
+                dog = Dog(devName, self._joinerEvent, startDelay, extraAttrs,
+                          self)
                 dog.tryFaultRecovery = self.TryFaultRecover
                 dog.tryHangRecovery = self.TryHangRecover
                 self.DevicesDict[devName] = dog
@@ -125,18 +127,79 @@ class Watchdog(PyTango.Device_4Impl):
                 traceback.print_exc()
         # per each of those cameras
         for devName in self.DevicesDict.keys():
-            dynAttrName = "%s__State" % (devName.replace("/", "__"))
-            # Replace by an "impossible" symbol
-            # --- FIXME: the separator would be improved
-#             dynAttr = PyTango.Attr(dynAttrName, PyTango.DevUShort,
-#                                    PyTango.READ)
-            dynAttr = PyTango.Attr(dynAttrName, PyTango.CmdArgType.DevState,
-                                   PyTango.READ)
-            # --- FIXME: Can the dynAttr be a DevState type?
-            self.add_attribute(dynAttr, r_meth=Watchdog.read_oneDeviceState,
-                               is_allo_meth=Watchdog.is_oneDeviceState_allowed)
-            self.debug_stream("In %s::processDevicesList() add dyn_attr %s"
-                              % (self.get_name(), dynAttrName))
+            self._build_WatchedStateAttribute(devName)
+            self._build_ExtraAttrs(devName, extraAttrs)
+            # FIXME: if device is not alive, those attributes are not created
+            #        later when it is recovered from hang, they should be
+            #        created. But not in all the recoveries because they may
+            #        already exist.
+
+    def _build_WatchedStateAttribute(self, devName):
+        dynAttrName = "%s%sState"\
+            % (devName.replace("/", SEPARATOR), SEPARATOR)
+        # Replace by an "impossible" symbol
+        # --- FIXME: the separator would be improved
+        aprop = PyTango.UserDefaultAttrProp()
+        aprop.set_label("%s/State" % (devName))
+        dynAttr = PyTango.Attr(dynAttrName, PyTango.CmdArgType.DevState,
+                               PyTango.READ)
+        dynAttr.set_default_properties(aprop)
+        self.add_attribute(dynAttr,
+                           r_meth=Watchdog.read_oneDeviceState,
+                           is_allo_meth=Watchdog.is_oneDeviceState_allowed)
+        self.set_change_event(dynAttrName, True, False)
+        self.debug_stream("In %s::_build_WatchedStateAttribute() "
+                          "add dyn_attr %s" % (self.get_name(), dynAttrName))
+
+    def _prepare_ExtraAttrs(self):
+        extraAttrs = []
+        for i in range(len(self.ExtraAttrList)):
+            subline = self.ExtraAttrList[i].split(',')
+            for j in range(len(subline)):
+                if len(subline[j]) > 0:
+                    try:
+                        attrName = subline[j].lower()
+                        extraAttrs.append(attrName)
+                    except Exception as e:
+                        errMsg = "In %s::_prepare_ExtraAttrs() "\
+                                 "Exception in ExtraAttrList processing: "\
+                                 "%d line, %d element, exception: %s"\
+                                 % (self.get_name(), i, j, str(e))
+                        self.error_stream(errMsg)
+                        traceback.print_exc()
+        return extraAttrs
+
+    def _build_ExtraAttrs(self, devName, attrsLst):
+        for attrName in attrsLst:
+            fullAttrName = "%s/%s" % (devName, attrName)
+            try:
+                attrCfg = PyTango.AttributeProxy(fullAttrName).get_config()
+                dynAttrName = "%s" % (fullAttrName.replace("/", SEPARATOR))
+                if attrCfg.data_format == PyTango.AttrDataFormat.SCALAR:
+                    aprop = PyTango.UserDefaultAttrProp()
+                    aprop.set_label(fullAttrName)
+                    dynAttr = PyTango.Attr(dynAttrName, attrCfg.data_type,
+                                           attrCfg.writable)
+                    dynAttr.set_default_properties(aprop)
+                    if attrCfg.writable == PyTango.AttrWriteType.READ_WRITE:
+                        w_meth = Watchdog.write_ExtraAttribute
+                    else:
+                        w_meth = None
+                    self.add_attribute(dynAttr,
+                                       r_meth=Watchdog.read_ExtraAttribute,
+                                       w_meth=w_meth,
+                                       is_allo_meth=
+                                       Watchdog.is_ExtraAttribute_allowed)
+                    self.set_change_event(dynAttrName, True, False)
+                else:
+                    raise Exception("Not yet supported array attributes")
+            except Exception as e:
+                errMsg = "In %s::_build_ExtraAttrs() "\
+                         "Exception in ExtraAttrList processing: "\
+                         "%s, exception: %s"\
+                         % (self.get_name(), fullAttrName, str(e))
+                self.error_stream(errMsg)
+                traceback.print_exc()
     # Done Process Properties ---
     #############################
 
@@ -145,7 +208,7 @@ class Watchdog(PyTango.Device_4Impl):
     def read_oneDeviceState(self, attr):
         self.debug_stream("In %s::read_oneDeviceState()" % (self.get_name()))
         try:
-            attrFullName = attr.get_name().replace("__", "/")
+            attrFullName = attr.get_name().replace(SEPARATOR, "/")
             devName, _ = attrFullName.rsplit('/', 1)
         except:
             self.error_stream("In %s::read_oneDeviceState() cannot extract "
@@ -174,6 +237,48 @@ class Watchdog(PyTango.Device_4Impl):
             #    Re-Start of Generated Code
             return False
         return True
+
+    def read_ExtraAttribute(self, attr):
+        devName, attrName = self._recoverDevAttrName(attr)
+        self.debug_stream("In %s::read_ExtraAttribute(): %s/%s"
+                          % (self.get_name(), devName, attrName))
+        value = self.DevicesDict[devName].getExtraAttr(attrName)
+        if value is not None:
+            attr.set_value(value)
+        else:
+            try:
+                attr.set_value_date_quality(0, time(),
+                                            PyTango.AttrQuality.ATTR_INVALID)
+            except:
+                attr.set_value_date_quality("", time(),
+                                            PyTango.AttrQuality.ATTR_INVALID)
+
+    def write_ExtraAttribute(self, attr):
+        devName, attrName = self._recoverDevAttrName(attr)
+        data = []
+        attr.get_write_value(data)
+        value = data[0]
+        self.debug_stream("In %s::write_ExtraAttribute(): %s/%s = %s"
+                          % (self.get_name(), devName, attrName, value))
+        self.DevicesDict[devName].setExtraAttr(attrName, value)
+
+    def is_ExtraAttribute_allowed(self, req_type):
+        if self.get_state() in [PyTango.DevState.FAULT]:
+            #    End of Generated Code
+            #    Re-Start of Generated Code
+            return False
+        return True
+
+    def _recoverDevAttrName(self, attr):
+        try:
+            attrFullName = attr.get_name().replace(SEPARATOR, "/")
+            devName, attrName = attrFullName.rsplit('/', 1)
+        except:
+            self.error_stream("In %s::_recoverDevAttrName() cannot extract "
+                              "the name from %s"
+                              % (self.get_name(), attr.get_name()))
+            devName, attrName = None, None
+        return devName, attrName
 
     # TODO: more dynamic attributes:
     #       - allow to adjust the {Fault,Hand}Recovery for each of the watched
@@ -308,7 +413,7 @@ class Watchdog(PyTango.Device_4Impl):
 
     def mailto(self, action, msg):
         if len(self.MailTo) != 0:
-            name = self.get_name()  # .replace('/', '__')
+            name = self.get_name()  # .replace("/", SEPARATOR)
             mail = email.mime.text.MIMEText(msg)
             mail['From'] = "%s@%s" % (name, gethostname())
             mail['To'] = ', '.join(self.MailTo)
@@ -330,6 +435,12 @@ class Watchdog(PyTango.Device_4Impl):
 
     def _prepareCollectorThread(self):
         if self._changesCollector is None:
+            try:
+                self.ReportPeriod = int(self.ReportPeriod)*60*60  # h to s
+            except:
+                self.ReportPeriod = COLLECTION_REPORT_PERIOD
+            self.debug_stream("Setting the periodic report period to %sh"
+                              % (self.ReportPeriod/60/60))
             self._changesCollector = Thread(target=self._collectionReporter)
             self._changesCollector.setDaemon(True)
             self._changesCollector.start()
@@ -382,7 +493,7 @@ class Watchdog(PyTango.Device_4Impl):
                                   ": %s" % (e))
             t_diff = time()-t0
             if not self._joinerEvent.isSet():
-                sleep(COLLECTION_REPORT_PERIOD-t_diff)
+                sleep(self.ReportPeriod-t_diff)
     # Done dog region ---
     #####################
 
@@ -537,14 +648,18 @@ class WatchdogClass(PyTango.DeviceClass):
     device_property_list = {
         'DevicesList':
             [PyTango.DevVarStringArray,
-             "Dictionary convertible string with an internal label as a key "
-             "and its device name as item.",
+             "List of string with the name of the devices to be watched.",
              []],
-        'SectorsList':
+        'ExtraAttrList':
             [PyTango.DevVarStringArray,
-             "Dictionary convertible string with sectors as key and the item "
-             "is a list of tags from the DeviceList.",
+             "For each of the devices watched, if exist, build attribute "
+             "mirrors ",
              []],
+#         'DeviceGroups':
+#             [PyTango.DevVarStringArray,
+#              "Dictionary with list in the items similar to the DeviceList "
+#              "but classifying the devices in groups using the keys.",
+#              []],
         'TryFaultRecover':
             [PyTango.DevBoolean,
              "Flag to tell the device that, if possible, try to recover "
@@ -559,6 +674,10 @@ class WatchdogClass(PyTango.DeviceClass):
             [PyTango.DevVarStringArray,
              "List of mail destinations to report when fault or hang lists "
              "changes",
+             []],
+        'ReportPeriod':
+            [PyTango.DevUShort,
+             "hours between periodic reports",
              []]
         }
 
