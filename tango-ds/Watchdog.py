@@ -382,7 +382,7 @@ class Watchdog(PyTango.Device_4Impl):
             self.fireHangAttrEvents()
 
     def fireHangAttrEvents(self):
-        devLst = self.attr_HangDevicesList_read
+        devLst = self.attr_HangDevicesList_read[:]
         howManyNow = len(devLst)
         if self.attr_HangDevices_read != howManyNow:
             self.attr_HangDevices_read = howManyNow
@@ -441,6 +441,7 @@ class Watchdog(PyTango.Device_4Impl):
                 self.ReportPeriod = COLLECTION_REPORT_PERIOD
             self.debug_stream("Setting the periodic report period to %sh"
                               % (self.ReportPeriod/60/60))
+            self._lastCollection = time()
             self._changesCollector = Thread(target=self._collectionReporter)
             self._changesCollector.setDaemon(True)
             self._changesCollector.start()
@@ -462,38 +463,43 @@ class Watchdog(PyTango.Device_4Impl):
                               % (action, e))
 
     def _collectionReporter(self):
-        self.debug_stream("Collector thread says hello")
-        lastCollection = time()
-        sleep(COLLECTION_REPORT_PERIOD)
-        subject = "Watchdog periodic report"
+        self.debug_stream("Collector thread says hello. "
+                          "First report in %d seconds" % (self.ReportPeriod))
+        sleep(self.ReportPeriod)
         while not self._joinerEvent.isSet():
             t0 = time()
-            try:
-                self.debug_stream("Collector thread starts reporting process")
-                avoidSend = True
-                mailBody = "Status Report from %s of watchdog %s\n\n"\
-                    % (ctime(lastCollection), self.get_name())
-                with self._changesCollectorLock:
-                    if len(self._changesDct.keys()) > 0:
-                        avoidSend = False
-                        for action in self._changesDct.keys():
-                            mailBody = "%sCollected events for action %s\n"\
-                                % (mailBody, action)
-                            for when in self._changesDct[action]:
-                                howmany, lst = self._changesDct[action][when]
-                                mailBody = "%s\tat %s: %d devices:\n\t\t%s\n"\
-                                    % (mailBody, when, howmany, lst)
-                    self._changesDct = {}
-                    lastCollection = time()
-                mailBody = "%s\n--\nEnd transmission." % (mailBody)
-                if not avoidSend:
-                    self.mailto(subject, mailBody)
-            except Exception as e:
-                self.error_stream("Exception reporting collected information"
-                                  ": %s" % (e))
+            self.debug_stream("Collector thread starts reporting process")
+            self._doCollectorReport()
             t_diff = time()-t0
             if not self._joinerEvent.isSet():
-                sleep(self.ReportPeriod-t_diff)
+                next = self.ReportPeriod-t_diff
+                self.debug_stream("Next report in %d seconds" % next)
+                sleep(next)
+
+    def _doCollectorReport(self):
+        subject = "Watchdog periodic report"
+        try:
+            avoidSend = True  # do not send if there is nothing to send
+            mailBody = "Status Report since %s of watchdog %s\n\n"\
+                % (ctime(self._lastCollection), self.get_name())
+            with self._changesCollectorLock:
+                if len(self._changesDct.keys()) > 0:
+                    avoidSend = False  # there is something to be reported
+                    for action in self._changesDct.keys():
+                        mailBody = "%sCollected events for action %s\n"\
+                            % (mailBody, action)
+                        for when in self._changesDct[action]:
+                            howmany, lst = self._changesDct[action][when]
+                            mailBody = "%s\tat %s: %d devices:\n\t\t%s\n"\
+                                % (mailBody, when, howmany, lst)
+                    self._changesDct = {}
+                    self._lastCollection = time()
+            mailBody = "%s\n--\nEnd transmission." % (mailBody)
+            if not avoidSend:
+                self.mailto(subject, mailBody)
+        except Exception as e:
+            self.error_stream("Exception reporting collected information"
+                              ": %s" % (e))
     # Done dog region ---
     #####################
 
@@ -677,7 +683,7 @@ class WatchdogClass(PyTango.DeviceClass):
              []],
         'ReportPeriod':
             [PyTango.DevUShort,
-             "hours between periodic reports",
+             "Hours between periodic reports",
              []]
         }
 
