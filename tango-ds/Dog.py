@@ -112,7 +112,7 @@ class Dog(Logger):
         self._extraEventIds = {}
         self._extraAttrValues = {}
         for attrName in extraAttrs:
-            attrName= attrName.lower()
+            attrName = attrName.lower()
             self._extraAttributes.append(attrName)
             self._extraEventIds[attrName] = None
             self._extraAttrValues[attrName] = None
@@ -156,7 +156,7 @@ class Dog(Logger):
             return value
         except DevFailed as e:
             self.warn_stream("%s/%s read exception: %s"
-                              % (self.devName, attrName, e[0].desc))
+                             % (self.devName, attrName, e[0].desc))
         except Exception as e:
             self.error_stream("%s/%s read exception: %s"
                               % (self.devName, attrName, e))
@@ -244,11 +244,11 @@ class Dog(Logger):
                                                    EventType.CHANGE_EVENT,
                                                    self)
                 self.info_stream("Subscribed to %s/%s (id=%d)"
-                             % (self.devName, attrName,
-                                self._extraEventIds[attrName]))
+                                 % (self.devName, attrName,
+                                    self._extraEventIds[attrName]))
             except DevFailed as e:
                 self.warn_stream("%s/%s failed to subscribe event: %s"
-                                  % (self.devName, attrName, e[0].desc))
+                                 % (self.devName, attrName, e[0].desc))
             except Exception as e:
                 self.error_stream("%s/%s failed to subscribe event: %s"
                                   % (self.devName, attrName, e))
@@ -261,7 +261,7 @@ class Dog(Logger):
                         unsubscribe_event(self._extraEventIds[attrName])
                 except Exception as e:
                     self.error_stream("%s/%s failed to unsubscribe event: %s"
-                                  % (self.devName, attrName, e))
+                                      % (self.devName, attrName, e))
                 self._extraEventIds[attrName] = None
             else:
                 self.warn_stream("%s/%s no event id to unsubscribe."

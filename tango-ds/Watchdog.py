@@ -41,7 +41,7 @@ import traceback
 from types import StringType
 
 
-COLLECTION_REPORT_PERIOD = 3600*24  # 1d
+COLLECTION_REPORT_PERIOD = 3600*8  # every 8h, three times a day
 
 
 # # Device States Description:
@@ -185,11 +185,11 @@ class Watchdog(PyTango.Device_4Impl):
                         w_meth = Watchdog.write_ExtraAttribute
                     else:
                         w_meth = None
+                    is_allowed = Watchdog.is_ExtraAttribute_allowed
                     self.add_attribute(dynAttr,
                                        r_meth=Watchdog.read_ExtraAttribute,
                                        w_meth=w_meth,
-                                       is_allo_meth=
-                                       Watchdog.is_ExtraAttribute_allowed)
+                                       is_allo_meth=is_allowed)
                     self.set_change_event(dynAttrName, True, False)
                 else:
                     raise Exception("Not yet supported array attributes")
@@ -450,7 +450,7 @@ class Watchdog(PyTango.Device_4Impl):
     def _collect(self, action, howmany, lst):
         try:
             with self._changesCollectorLock:
-                if not action in self._changesDct:
+                if action not in self._changesDct:
                     self._changesDct[action] = {}
                 now = ctime()
                 while now in self._changesDct[action]:
@@ -488,12 +488,15 @@ class Watchdog(PyTango.Device_4Impl):
                     for action in self._changesDct.keys():
                         mailBody = "%sCollected events for action %s\n"\
                             % (mailBody, action)
-                        whenLst = self._changesDct[action]
+                        whenLst = self._changesDct[action].keys()
                         whenLst.sort()
                         for when in whenLst:
                             howmany, lst = self._changesDct[action][when]
-                            mailBody = "%s\tat %s: %d devices:\n\t\t%s\n"\
-                                % (mailBody, when, howmany, lst)
+                            mailBody = "%s\tat %s: %d devices\n"\
+                                % (mailBody, when, howmany)
+                            lst.sort()
+                            for each in lst:
+                                mailBody = "%s\t\t%s\n" % (mailBody, each)
                     self._changesDct = {}
                     self._lastCollection = time()
             mailBody = "%s\n--\nEnd transmission." % (mailBody)
@@ -502,6 +505,15 @@ class Watchdog(PyTango.Device_4Impl):
         except Exception as e:
             self.error_stream("Exception reporting collected information"
                               ": %s" % (e))
+            traceback.print_exc()
+            try:
+                subject = "Report exception"
+                mailBody = ""
+                self.mailto(subject, mailBody)
+            except Exception as e2:
+                self.error_stream("Not reported the first exception, because"
+                                  "another in email send: %s" % (e2))
+                traceback.print_exc()
     # Done dog region ---
     #####################
 
