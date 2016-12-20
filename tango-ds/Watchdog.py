@@ -110,6 +110,8 @@ class Watchdog(PyTango.Device_4Impl):
         extraAttrs = self._prepare_ExtraAttrs()
         for i, devName in enumerate(allDevices):
             try:
+                self._build_WatchedStateAttribute(devName)
+                self._build_ExtraAttrs(devName, extraAttrs)
                 startDelay = timeSeparation*i
                 self.info_stream("for %d. device %s there will be a delay "
                                  "of %g seconds" % (i+1, devName, startDelay))
@@ -125,14 +127,6 @@ class Watchdog(PyTango.Device_4Impl):
                          % (self.get_name(), i, devName, str(e))
                 self.error_stream(errMsg)
                 traceback.print_exc()
-        # per each of those cameras
-        for devName in self.DevicesDict.keys():
-            self._build_WatchedStateAttribute(devName)
-            self._build_ExtraAttrs(devName, extraAttrs)
-            # FIXME: if device is not alive, those attributes are not created
-            #        later when it is recovered from hang, they should be
-            #        created. But not in all the recoveries because they may
-            #        already exist.
 
     def _build_WatchedStateAttribute(self, devName):
         dynAttrName = "%s%sState"\
@@ -299,24 +293,17 @@ class Watchdog(PyTango.Device_4Impl):
                 attrName = attrEvent[0]
                 attrValue = attrEvent[1]
                 attrNames.append(attrName)
-                self.debug_stream("In %s::fireEventsList() attribute: %s, "
-                                  "value: %s" % (self.get_name(), attrName,
-                                                 str(attrValue)))
-                # FIXME: is this CyclicBuffer something useless?
-                #        (from a copypaste maybe?)
-                if attrName in ['CyclicBuffer'] and\
-                        not self.attr_emitCyclicBuffer_read:
-                    self.debug_stream("In %s::fireEventsList() attribute: %s "
-                                      "avoided to emit the event due to flag."
-                                      % (self.get_name(), attrName))
-                    attrQuality = None
-                elif len(attrEvent) == 3:  # specifies quality
+                if len(attrEvent) == 3:  # specifies quality
                     attrQuality = attrEvent[2]
                 else:
                     attrQuality = PyTango.AttrQuality.ATTR_VALID
-                if attrQuality:
-                    self.push_change_event(attrName, attrValue,
-                                           timestamp, attrQuality)
+                self.push_change_event(attrName, attrValue,
+                                       timestamp, attrQuality)
+                self.debug_stream("In %s::fireEventsList() attribute: %s, "
+                                  "value: %s (quality %s, timestamp %s)"
+                                  % (self.get_name(), attrName,
+                                     str(attrValue), str(attrQuality),
+                                     str(timestamp)))
             except Exception as e:
                 self.error_stream("In %s::fireEventsList() Exception "
                                   "with attribute %s:\n%s"
@@ -469,7 +456,8 @@ class Watchdog(PyTango.Device_4Impl):
         while not self._joinerEvent.isSet():
             t0 = time()
             self.debug_stream("Collector thread starts reporting process")
-            self._doCollectorReport()
+            if self._doCollectorReport():
+                self._changesDct = {}
             t_diff = time()-t0
             if not self._joinerEvent.isSet():
                 next = self.ReportPeriod-t_diff
@@ -497,11 +485,11 @@ class Watchdog(PyTango.Device_4Impl):
                             lst.sort()
                             for each in lst:
                                 mailBody = "%s\t\t%s\n" % (mailBody, each)
-                    self._changesDct = {}
                     self._lastCollection = time()
             mailBody = "%s\n--\nEnd transmission." % (mailBody)
             if not avoidSend:
                 self.mailto(subject, mailBody)
+            return True
         except Exception as e:
             self.error_stream("Exception reporting collected information"
                               ": %s" % (e))
@@ -514,6 +502,7 @@ class Watchdog(PyTango.Device_4Impl):
                 self.error_stream("Not reported the first exception, because"
                                   "another in email send: %s" % (e2))
                 traceback.print_exc()
+            return False
     # Done dog region ---
     #####################
 
