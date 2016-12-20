@@ -160,7 +160,7 @@ class Dog(Logger):
         except Exception as e:
             self.error_stream("%s/%s read exception: %s"
                               % (self.devName, attrName, e))
-            raise Exception("%s/%s cannot be read" % (self.devname, attrName))
+            raise Exception("%s/%s cannot be read" % (self.devName, attrName))
 
     def setExtraAttr(self, attrName, value):
         try:
@@ -168,7 +168,7 @@ class Dog(Logger):
         except Exception as e:
             self.error_stream("%s/%s write exception: %s"
                               % (self.devName, attrName, e))
-            raise Exception("%s/%s cannot be write" % (self.devname, attrName))
+            raise Exception("%s/%s cannot be write" % (self.devName, attrName))
 
     @property
     def tryFaultRecovery(self):
