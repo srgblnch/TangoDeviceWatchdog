@@ -488,7 +488,9 @@ class Watchdog(PyTango.Device_4Impl):
                     for action in self._changesDct.keys():
                         mailBody = "%sCollected events for action %s\n"\
                             % (mailBody, action)
-                        for when in self._changesDct[action]:
+                        whenLst = self._changesDct[action]
+                        whenLst.sort()
+                        for when in whenLst:
                             howmany, lst = self._changesDct[action][when]
                             mailBody = "%s\tat %s: %d devices:\n\t\t%s\n"\
                                 % (mailBody, when, howmany, lst)
