@@ -158,7 +158,12 @@ class Dog(Logger):
             return value
         except DevFailed as e:
             if not self.isInHangLst(self.devName):
-                self.appendToHang(self.devName)
+                try:
+                    self.devProxy.State()
+                except:
+                    self.appendToHang(self.devName)
+                if e[0].reason == 'ATTRIBUTE_UNAVAILABLE':
+                    return
                 self.warn_stream("%s/%s read exception: %r %s"
                                  % (self.devName, attrName,
                                     e[0].reason, e[0].desc))
@@ -174,7 +179,10 @@ class Dog(Logger):
                 self.removeFromHang(self.devName)
         except DevFailed as e:
             if not self.isInHangLst(self.devName):
-                self.appendToHang(self.devName)
+                try:
+                    self.devProxy.State()
+                except:
+                    self.appendToHang(self.devName)
                 self.warn_stream("%s/%s write exception: %r %s"
                                  % (self.devName, attrName,
                                     e[0].reason, e[0].desc))
@@ -308,9 +316,10 @@ class Dog(Logger):
                 # self.debug_stream("%s push_event() %s: value has None type"
                 #                   %(self.devName, event.attr_name))
                 return
-            # ---FIXME: Ugly!! but it comes with a fullname
-            try:
-                nameSplit = event.attr_name.split('/', 3)
+            try:  # ---FIXME: Ugly!! but it comes with a fullname
+                # nameSplit = event.attr_name.split('/', 3)
+                # it may start as tango://...
+                nameSplit = event.attr_name.rsplit('/', 4)[-4:]
                 domain, family, member, attrName = nameSplit
             except Exception as e:
                 self.error_stream("%s push_event() error splitting the "
