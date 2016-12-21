@@ -38,7 +38,7 @@ from threading import Thread, Event
 import traceback
 
 
-DEFAULT_RECHECK_TIME = 180.0  # seconds
+DEFAULT_RECHECK_TIME = 90.0  # seconds
 DEFAULT_nOVERLAPS_ALERT = 10
 DEFAULT_ASTOR_nSTOPS = 2
 DEFAULT_ASTOR_STOPWAIT = 3  # seconds
@@ -153,18 +153,31 @@ class Dog(Logger):
                                      self._extraAttrValues[attrName], value))
                 self._extraAttrValues[attrName] = value
                 self.fireEvent(attrName, value, timestamp, quality)
+            if self.isInHangLst(self.devName):
+                self.removeFromHang(self.devName)
             return value
         except DevFailed as e:
-            self.warn_stream("%s/%s read exception: %s"
-                             % (self.devName, attrName, e[0].desc))
+            if not self.isInHangLst(self.devName):
+                self.appendToHang(self.devName)
+                self.warn_stream("%s/%s read exception: %r %s"
+                                 % (self.devName, attrName,
+                                    e[0].reason, e[0].desc))
         except Exception as e:
             self.error_stream("%s/%s read exception: %s"
                               % (self.devName, attrName, e))
-            raise Exception("%s/%s cannot be read" % (self.devName, attrName))
+        raise Exception("%s/%s cannot be read" % (self.devName, attrName))
 
     def setExtraAttr(self, attrName, value):
         try:
             self._devProxy[attrName] = value
+            if self.isInHangLst(self.devName):
+                self.removeFromHang(self.devName)
+        except DevFailed as e:
+            if not self.isInHangLst(self.devName):
+                self.appendToHang(self.devName)
+                self.warn_stream("%s/%s write exception: %r %s"
+                                 % (self.devName, attrName,
+                                    e[0].reason, e[0].desc))
         except Exception as e:
             self.error_stream("%s/%s write exception: %s"
                               % (self.devName, attrName, e))
@@ -296,8 +309,14 @@ class Dog(Logger):
                 #                   %(self.devName, event.attr_name))
                 return
             # ---FIXME: Ugly!! but it comes with a fullname
-            nameSplit = event.attr_name.rsplit('/', 4)[1:5]
-            domain, family, member, attrName = nameSplit
+            try:
+                nameSplit = event.attr_name.split('/', 3)
+                domain, family, member, attrName = nameSplit
+            except Exception as e:
+                self.error_stream("%s push_event() error splitting the "
+                                  "attr_name %s from the event."
+                                  % (self.devName, event.attr_name))
+                return
             devName = "%s/%s/%s" % (domain, family, member)
             attrName = attrName.lower()
             if devName != self.devName:
@@ -338,19 +357,18 @@ class Dog(Logger):
             elif newState is DevState.FAULT:
                 self.appendToFault(self.devName)
             # state change from one of the lists
-            elif self.__wasRunning():
+            elif self.__wasRunning() or self.isInRunningLst(self.devName):
                 self.removeFromRunning(self.devName)
-            elif self.__wasInFault():
+            elif self.__wasInFault() or self.isInFaultLst(self.devName):
                 self.removeFromFault(self.devName)
                 self._faultRecoveryCtr = 0
             # recover from Hang
-            if self.devState is None:
-                if self.isInHangLst(self.devName):
-                    self.debug_stream("%s received state information after "
-                                      "hang, remove from the list."
-                                      % (self.devName))
-                    self.removeFromHang(self.devName)
-                    self._hangRecoveryCtr = 0
+            if self.devState is None or self.isInHangLst(self.devName):
+                self.debug_stream("%s received state information after "
+                                  "hang, remove from the list."
+                                  % (self.devName))
+                self.removeFromHang(self.devName)
+                self._hangRecoveryCtr = 0
             self._devState = newState
             self.debug_stream("%s store newer state %s"
                               % (self.devName, self.devState))

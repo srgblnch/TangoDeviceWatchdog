@@ -41,7 +41,7 @@ import traceback
 from types import StringType
 
 
-COLLECTION_REPORT_PERIOD = 3600*8  # every 8h, three times a day
+COLLECTION_REPORT_PERIOD = 3600#*8  # every 8h, three times a day
 
 
 # # Device States Description:
@@ -200,7 +200,7 @@ class Watchdog(PyTango.Device_4Impl):
     ######################
     # # dyn_attr region ---
     def read_oneDeviceState(self, attr):
-        self.debug_stream("In %s::read_oneDeviceState()" % (self.get_name()))
+#         self.debug_stream("In %s::read_oneDeviceState()" % (self.get_name()))
         try:
             attrFullName = attr.get_name().replace(SEPARATOR, "/")
             devName, _ = attrFullName.rsplit('/', 1)
@@ -234,8 +234,8 @@ class Watchdog(PyTango.Device_4Impl):
 
     def read_ExtraAttribute(self, attr):
         devName, attrName = self._recoverDevAttrName(attr)
-        self.debug_stream("In %s::read_ExtraAttribute(): %s/%s"
-                          % (self.get_name(), devName, attrName))
+#         self.debug_stream("In %s::read_ExtraAttribute(): %s/%s"
+#                           % (self.get_name(), devName, attrName))
         value = self.DevicesDict[devName].getExtraAttr(attrName)
         if value is not None:
             attr.set_value(value)
@@ -557,40 +557,42 @@ class Watchdog(PyTango.Device_4Impl):
         self.change_state(PyTango.DevState.ON)
 
     def always_executed_hook(self):
-        self.debug_stream("In always_excuted_hook()")
+#         self.debug_stream("In always_excuted_hook()")
+        pass
 
     # -------------------------------------------------------------------------
     #    Watchdog read/write attribute methods
     # -------------------------------------------------------------------------
     def read_RunningDevices(self, attr):
-        self.debug_stream("In read_RunningDevices()")
+#         self.debug_stream("In read_RunningDevices()")
         attr.set_value(self.attr_RunningDevices_read)
 
     def read_FaultDevices(self, attr):
-        self.debug_stream("In read_FaultDevices()")
+#         self.debug_stream("In read_FaultDevices()")
         attr.set_value(self.attr_FaultDevices_read)
 
     def read_HangDevices(self, attr):
-        self.debug_stream("In read_HangDevices()")
+#         self.debug_stream("In read_HangDevices()")
         attr.set_value(self.attr_HangDevices_read)
 
     def read_RunningDevicesList(self, attr):
-        self.debug_stream("In read_RunningDevicesList()")
+#         self.debug_stream("In read_RunningDevicesList()")
         attr.set_value(self.attr_RunningDevicesList_read)
 
     def read_FaultDevicesList(self, attr):
-        self.debug_stream("In read_FaultDevicesList()")
+#         self.debug_stream("In read_FaultDevicesList()")
         attr.set_value(self.attr_FaultDevicesList_read)
 
     def read_HangDevicesList(self, attr):
-        self.debug_stream("In read_HangDevicesList()")
+#         self.debug_stream("In read_HangDevicesList()")
         attr.set_value(self.attr_HangDevicesList_read)
 
     def initialize_dynamic_attributes(self):
         pass
 
     def read_attr_hardware(self, data):
-        self.debug_stream("In read_attr_hardware()")
+#         self.debug_stream("In read_attr_hardware()")
+        pass
 
 
 # =============================================================================
