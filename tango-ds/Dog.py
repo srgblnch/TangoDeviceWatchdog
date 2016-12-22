@@ -142,6 +142,9 @@ class Dog(Logger):
     def devState(self):
         return self._devState
 
+    def hasExtraAttr(self, attrName):
+        return self._extraAttributes.count(attrName.lower()) > 0
+
     def getExtraAttr(self, attrName):
         try:
             value = self._devProxy[attrName].value
