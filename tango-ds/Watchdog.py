@@ -29,6 +29,7 @@ __all__ = ["Watchdog", "WatchdogClass", "main"]
 __docformat__ = 'restructuredtext'
 
 
+from dealer import Equidistant, MinMax
 from dog import Dog, DEFAULT_RECHECK_TIME, SEPARATOR
 import email.mime.text
 import PyTango
@@ -127,6 +128,24 @@ class Watchdog(PyTango.Device_4Impl):
                          % (self.get_name(), i, devName, str(e))
                 self.error_stream(errMsg)
                 traceback.print_exc()
+        self._buildDealer()
+
+    def _buildDealer(self):
+        dealerLst = []  # Hackish!!!
+        for bar in self.DealerAttrList:
+            subLst = bar.split(',')
+            for foo in subLst:
+                dealerLst.append(foo.strip())
+        self._dealer = Equidistant(attrLst=dealerLst,
+                                   dogsLst=self.DevicesDict.values(),
+                                   statesLst=[PyTango.DevState.RUNNING],
+                                   distance=1000,
+                                   parent=self)
+#         self._dealer = MinMax(attrLst=dealerLst,
+#                               dogsLst=self.DevicesDict.values(),
+#                               statesLst=[PyTango.DevState.RUNNING],
+#                               min=0, max=5000,
+#                               parent=self)
 
     def _build_WatchedStateAttribute(self, devName):
         dynAttrName = "%s%sState"\
@@ -322,11 +341,13 @@ class Watchdog(PyTango.Device_4Impl):
     def appendToRunning(self, who):
         if self.appendToLst(self.attr_RunningDevicesList_read, "Running", who):
             self.fireRunningAttrEvents()
+            self._dealer.distribute()
 
     def removeFromRunning(self, who):
         if self.removeFromLst(self.attr_RunningDevicesList_read, "Running",
                               who):
             self.fireRunningAttrEvents()
+            self._dealer.distribute()
 
     def fireRunningAttrEvents(self):
         devLst = self.attr_RunningDevicesList_read[:]
@@ -665,6 +686,10 @@ class WatchdogClass(PyTango.DeviceClass):
             [PyTango.DevVarStringArray,
              "For each of the devices watched, if exist, build attribute "
              "mirrors ",
+             []],
+        'DealerAttrList':
+            [PyTango.DevVarStringArray,
+             "Attributes that the dealer will balance",
              []],
 #         'DeviceGroups':
 #             [PyTango.DevVarStringArray,

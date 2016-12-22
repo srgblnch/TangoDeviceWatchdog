@@ -177,6 +177,8 @@ class Dog(Logger):
 
     def setExtraAttr(self, attrName, value):
         try:
+            self.debug_stream("Writing %s/%s with %s"
+                              % (self.devName, attrName, str(value)))
             self._devProxy[attrName] = value
             if self.isInHangLst(self.devName):
                 self.removeFromHang(self.devName)
