@@ -29,7 +29,7 @@ __all__ = ["Watchdog", "WatchdogClass", "main"]
 __docformat__ = 'restructuredtext'
 
 
-from Dog import Dog, DEFAULT_RECHECK_TIME, SEPARATOR
+from dog import Dog, DEFAULT_RECHECK_TIME, SEPARATOR
 import email.mime.text
 import PyTango
 import smtplib
