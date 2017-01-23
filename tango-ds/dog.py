@@ -165,7 +165,8 @@ class Dog(Logger):
                     self.devProxy.State()
                 except:
                     self.appendToHang(self.devName)
-                if e[0].reason == 'ATTRIBUTE_UNAVAILABLE':
+                if e[0].reason in ['ATTRIBUTE_UNAVAILABLE',
+                                   'SOFTWARE_FAILURE']:
                     return
                 self.warn_stream("%s/%s read exception: %r %s"
                                  % (self.devName, attrName,
@@ -177,8 +178,8 @@ class Dog(Logger):
 
     def setExtraAttr(self, attrName, value):
         try:
-            self.debug_stream("Writing %s/%s with %s"
-                              % (self.devName, attrName, str(value)))
+            self.info_stream("Writing %s/%s with %s"
+                             % (self.devName, attrName, str(value)))
             self._devProxy[attrName] = value
             if self.isInHangLst(self.devName):
                 self.removeFromHang(self.devName)
@@ -414,7 +415,8 @@ class Dog(Logger):
         for i in range(2):
             state = self.__stateRequest()
             if state:
-                self.info_stream("%s respond state %s" % (self.devName, state))
+                self.debug_stream("%s respond state %s"
+                                  % (self.devName, state))
                 break
         if not state:  # no answer from the device
             if not self.isInHangLst(self.devName):
@@ -490,7 +492,7 @@ class Dog(Logger):
                                  % (self.devName))
         except Exception as exceptionObj:
             self.error_stream("%s in Fault recovery procedure Exception: %s"
-                              % (self.devName, e))
+                              % (self.devName, exceptionObj))
         else:
             self.info_stream("%s Init() completed" % (self.devName))
             exceptionObj = None

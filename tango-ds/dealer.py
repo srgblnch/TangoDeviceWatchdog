@@ -38,6 +38,16 @@ class Dealer(Logger):
         self._setStatesLst(statesLst)
         self._setAttrLst(attrLst)
 
+    def type(self):
+        if type(self) == Equidistant:
+            return 'Equidistant'
+        if type(self) == MinMax:
+            return 'MinMax'
+        return ''
+
+    def types(self):
+        return ['Equidistant', 'MinMax']
+
     def _setDogsLst(self, dogsLst):
         if all([type(dog) is Dog for dog in dogsLst]):
             self.__dogs = dogsLst
@@ -69,9 +79,16 @@ class Dealer(Logger):
 
     @property
     def attrLst(self):
-        return self.__attrLst
+        return self.__attrLst[:]
+
+    @property
+    def dogsLst(self):
+        return self.__dogs[:]
 
     def pairOfAttrs(self):
+        if len(self.__attrLst) == 0:
+            self.error_stream("No attributes to distribute. "
+                              "Check 'DealerAttrList' property!")
         i = 0
         while i < len(self.__attrLst):
             first = self.__attrLst[i]
@@ -79,6 +96,8 @@ class Dealer(Logger):
                 second = self.__attrLst[i+1]
             else:
                 second = None
+            self.info_stream("Requested %dth pair of attributes: %s"
+                             % (i, [first, second]))
             yield [first, second]
             i += 2
 
@@ -107,12 +126,12 @@ class Dealer(Logger):
         for dog in self.__dogs:
             if dog.devState in self.__states:
                 candidates.append(dog)
-        self.debug_stream("Dealer candidates: %s" % (candidates))
+        self.info_stream("Dealer candidates: %s" % (candidates))
         return candidates
 
     def distribute(self):
         raise NotImplementedError("No super class implementation")
-    
+
     def doWrite(self, dog, attrName, value):
         try:
             dog.setExtraAttr(attrName, value)
@@ -140,10 +159,10 @@ class Equidistant(Dealer):
     def distribute(self):
         candidates = self.candidates
         distribution = range(0, len(candidates)*self.distance, self.distance)
-        self.debug_stream("Dealer distribution: %s" % (distribution))
+        self.info_stream("Dealer distribution: %s" % (distribution))
         for i, dog in enumerate(candidates):
-            self.debug_stream("Working for candidate %d: %s"
-                              % (i, dog.devName))
+            self.info_stream("Working for candidate %d: %s"
+                             % (i, dog.devName))
             for first, second in self.pairOfAttrs():
                 self.doWrite(dog, first, distribution[i])
                 self.doWrite(dog, second, distribution[-i])
@@ -182,10 +201,28 @@ class MinMax(Dealer):
     def distribute(self):
         candidates = self.candidates
         distribution = linspace(self.min, self.max, len(candidates))
-        self.debug_stream("Dealer distribution: %s" % (distribution))
+        self.info_stream("Dealer distribution: %s" % (distribution))
         for i, dog in enumerate(candidates):
-            self.debug_stream("Working for candidate %d: %s"
-                              % (i, dog.devName))
+            self.info_stream("Working for candidate %d: %s"
+                             % (i, dog.devName))
             for first, second in self.pairOfAttrs():
                 self.doWrite(dog, first, int(distribution[i]))
                 self.doWrite(dog, second, int(distribution[-i]))
+
+
+def BuildEquidistantDealer(attrLst, dogsLst, statesLst, distance, parent):
+    return Equidistant(attrLst=attrLst, dogsLst=dogsLst, statesLst=statesLst,
+                       distance=distance, parent=parent)
+
+
+def BuildMinMaxDealer(attrLst, dogsLst, statesLst, distance, parent):
+    return MinMax(attrLst=attrLst, dogsLst=dogsLst, statesLst=statesLst,
+                  min=distance[0], max=distance[1], parent=parent)
+
+
+def BuildDealer(dealerType, attrLst, dogsLst, statesLst, distance, parent):
+    if dealerType == 'Equidistant':
+        return BuildEquidistantDealer(attrLst, dogsLst, statesLst, distance,
+                                      parent)
+    if dealerType == 'MinMax':
+        return BuildMinMaxDealer(attrLst, dogsLst, statesLst, distance, parent)

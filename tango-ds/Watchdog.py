@@ -29,7 +29,7 @@ __all__ = ["Watchdog", "WatchdogClass", "main"]
 __docformat__ = 'restructuredtext'
 
 
-from dealer import Equidistant, MinMax
+from dealer import BuildDealer
 from dog import Dog, DEFAULT_RECHECK_TIME, SEPARATOR
 import email.mime.text
 import PyTango
@@ -42,7 +42,7 @@ import traceback
 from types import StringType
 
 
-COLLECTION_REPORT_PERIOD = 3600#*8  # every 8h, three times a day
+COLLECTION_REPORT_PERIOD = 3600*8  # every 8h, three times a day
 
 
 # # Device States Description:
@@ -113,6 +113,9 @@ class Watchdog(PyTango.Device_4Impl):
             try:
                 self._build_WatchedStateAttribute(devName)
                 self._build_ExtraAttrs(devName, extraAttrs)
+                # TODO: build SpectrumAttr with the content of each
+                # TODO: together with a SpectrumAttr with the name for each
+                #       position in those lists.
                 startDelay = timeSeparation*i
                 self.info_stream("for %d. device %s there will be a delay "
                                  "of %g seconds" % (i+1, devName, startDelay))
@@ -131,21 +134,47 @@ class Watchdog(PyTango.Device_4Impl):
         self._buildDealer()
 
     def _buildDealer(self):
+        print("\n"*10)
+        try:
+            self._buildDealerAttrs()
+            self._rebuildDealer()
+        except Exception as e:
+            self.error_stream("Exception building the dealer: %s" % (e))
+            traceback.print_exc()
+        else:
+            self.info_stream("Dealer build")
+        print("\n"*10)
+
+    def _buildDealerAttrs(self):
+        # list of possible dealers
+        dealerOptions = PyTango.SpectrumAttr('Dealers', PyTango.DevString,
+                                             PyTango.READ, 10)
+        self.add_attribute(dealerOptions, self.read_Dealers)
+        # dealer in use (required to be memorised)
+        dealerAttr = PyTango.Attr('Dealer', PyTango.DevString,
+                                  PyTango.READ_WRITE)
+        dealerAttr.set_memorized()
+        dealerAttr.set_memorized_init(True)
+        self.add_attribute(dealerAttr, self.read_Dealer, self.write_Dealer)
+        # TODO: dealer configurations (min, max, ...)
+
+    def _rebuildDealer(self, value='Equidistant'):
         dealerLst = []  # Hackish!!!
         for bar in self.DealerAttrList:
             subLst = bar.split(',')
             for foo in subLst:
                 dealerLst.append(foo.strip())
-        self._dealer = Equidistant(attrLst=dealerLst,
-                                   dogsLst=self.DevicesDict.values(),
-                                   statesLst=[PyTango.DevState.RUNNING],
-                                   distance=1000,
-                                   parent=self)
-#         self._dealer = MinMax(attrLst=dealerLst,
-#                               dogsLst=self.DevicesDict.values(),
-#                               statesLst=[PyTango.DevState.RUNNING],
-#                               min=0, max=5000,
-#                               parent=self)
+        dogsLst = self.DevicesDict.values()
+        statesLst = [PyTango.DevState.RUNNING]
+        if value == 'Equidistant':
+            distance = 1000
+        elif value == 'MinMax':
+            distance = [0, 5000]
+        else:
+            return
+        self._dealer = BuildDealer(value, attrLst=dealerLst,
+                                   dogsLst=dogsLst, statesLst=statesLst,
+                                   distance=distance, parent=self)
 
     def _build_WatchedStateAttribute(self, devName):
         dynAttrName = "%s%sState"\
@@ -293,6 +322,25 @@ class Watchdog(PyTango.Device_4Impl):
             devName, attrName = None, None
         return devName, attrName
 
+    def read_Dealer(self, attr):
+        if not self._dealer:
+            attr.set_value('')
+        else:
+            attr.set_value(self._dealer.type())
+
+    def write_Dealer(self, attr=None):
+        data = []
+        attr.get_write_value(data)
+        value = data[0]
+        if self._dealer and value in self._dealer.types():
+            self._rebuildDealer(value)
+
+    def read_Dealers(self, attr):
+        if not self._dealer:
+            attr.set_value([''])
+        else:
+            attr.set_value(self._dealer.types())
+
     # TODO: more dynamic attributes:
     #       - allow to adjust the {Fault,Hand}Recovery for each of the watched
     #         (remember to make them memorised).
@@ -328,8 +376,8 @@ class Watchdog(PyTango.Device_4Impl):
                                   "with attribute %s:\n%s"
                                   % (self.get_name(), attrEvent[0], e))
         if len(attrNames) > 0:
-            self.info_stream("In %s::fireEventsList() emitted %d events: %s"
-                             % (self.get_name(), len(attrNames), attrNames))
+            self.debug_stream("In %s::fireEventsList() emitted %d events: %s"
+                              % (self.get_name(), len(attrNames), attrNames))
     # Done events region ---
     ########################
 
@@ -341,13 +389,15 @@ class Watchdog(PyTango.Device_4Impl):
     def appendToRunning(self, who):
         if self.appendToLst(self.attr_RunningDevicesList_read, "Running", who):
             self.fireRunningAttrEvents()
-            self._dealer.distribute()
+            if self._dealer:
+                self._dealer.distribute()
 
     def removeFromRunning(self, who):
         if self.removeFromLst(self.attr_RunningDevicesList_read, "Running",
                               who):
             self.fireRunningAttrEvents()
-            self._dealer.distribute()
+            if self._dealer:
+                self._dealer.distribute()
 
     def fireRunningAttrEvents(self):
         devLst = self.attr_RunningDevicesList_read[:]
@@ -573,6 +623,7 @@ class Watchdog(PyTango.Device_4Impl):
         self._changesDct = {}
         self._changesCollectorLock = Lock()
         self._prepareCollectorThread()
+        self._dealer = None
         self._processDevicesListProperty()
         # everything ok:
         self.change_state(PyTango.DevState.ON)
