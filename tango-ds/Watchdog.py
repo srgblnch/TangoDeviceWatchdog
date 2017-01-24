@@ -367,9 +367,20 @@ class Watchdog(PyTango.Device_4Impl):
 
     def _readExtraAttrLst(self, attr):
         attrName = attr.get_name()
+        attrType = attr.get_data_type()
         values = []
+        self.info_stream("collecting %s" % (attrName))
         for devName in self._allDevices:
-            values.append(self.DevicesDict[devName].getExtraAttr(attrName))
+            value = self.DevicesDict[devName].getExtraAttr(attrName)
+            if value is None:
+                if attrType in [PyTango.DevString]:
+                    value = ''
+                elif attrType in [PyTango.DevFloat, PyTango.DevDouble]:
+                    value = float('nan')
+                else:  # if attrType in [PyTango.DevShort, PyTango.DevLong]:
+                    value = 0
+            self.info_stream("\tdevice %s: %s" % (devName, value))
+            values.append(value)
         attr.set_value(values)
 
     # TODO: more dynamic attributes:
