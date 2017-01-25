@@ -6,12 +6,12 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>534</width>
-    <height>203</height>
+    <width>238</width>
+    <height>175</height>
    </rect>
   </property>
   <property name="windowTitle">
-   <string>tableView</string>
+   <string>StateList</string>
   </property>
   <layout class="QGridLayout" name="gridLayout">
    <item row="0" column="0">
@@ -24,24 +24,11 @@
        <rect>
         <x>0</x>
         <y>0</y>
-        <width>520</width>
-        <height>189</height>
+        <width>209</width>
+        <height>201</height>
        </rect>
       </property>
       <layout class="QGridLayout" name="gridLayout_3">
-       <item row="0" column="1">
-        <spacer name="verticalSpacer">
-         <property name="orientation">
-          <enum>Qt::Vertical</enum>
-         </property>
-         <property name="sizeHint" stdset="0">
-          <size>
-           <width>20</width>
-           <height>40</height>
-          </size>
-         </property>
-        </spacer>
-       </item>
        <item row="1" column="0">
         <spacer name="horizontalSpacer">
          <property name="orientation">
@@ -54,6 +41,23 @@
           </size>
          </property>
         </spacer>
+       </item>
+       <item row="1" column="1">
+        <layout class="QGridLayout" name="table">
+         <item row="0" column="1">
+          <widget class="TaurusLabel" name="number"/>
+         </item>
+         <item row="0" column="0">
+          <widget class="QLabel" name="stateLabel">
+           <property name="text">
+            <string>State</string>
+           </property>
+          </widget>
+         </item>
+         <item row="1" column="0" colspan="2">
+          <widget class="TaurusValuesTable" name="devList"/>
+         </item>
+        </layout>
        </item>
        <item row="1" column="2">
         <spacer name="horizontalSpacer_2">
@@ -68,32 +72,18 @@
          </property>
         </spacer>
        </item>
-       <item row="1" column="1">
-        <layout class="QGridLayout" name="table">
-         <property name="leftMargin">
-          <number>2</number>
+       <item row="0" column="1">
+        <spacer name="verticalSpacer">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
          </property>
-         <property name="topMargin">
-          <number>2</number>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
          </property>
-         <property name="rightMargin">
-          <number>2</number>
-         </property>
-         <item row="0" column="0">
-          <widget class="QLabel" name="nameLabel">
-           <property name="text">
-            <string>Name</string>
-           </property>
-          </widget>
-         </item>
-         <item row="0" column="1">
-          <widget class="QLabel" name="stateLabel">
-           <property name="text">
-            <string>State</string>
-           </property>
-          </widget>
-         </item>
-        </layout>
+        </spacer>
        </item>
        <item row="2" column="1">
         <spacer name="verticalSpacer_2">
@@ -119,6 +109,17 @@
    <class>TaurusWidget</class>
    <extends>QWidget</extends>
    <header>taurus.qt.qtgui.container</header>
+   <container>1</container>
+  </customwidget>
+  <customwidget>
+   <class>TaurusLabel</class>
+   <extends>QLabel</extends>
+   <header>taurus.qt.qtgui.display</header>
+  </customwidget>
+  <customwidget>
+   <class>TaurusValuesTable</class>
+   <extends>TaurusWidget</extends>
+   <header>taurus.qt.qtgui.table</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

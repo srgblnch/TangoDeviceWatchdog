@@ -84,7 +84,9 @@ class TableView(TaurusWidget):
     def _setSubcolumns(self, row, watchdogName, monitoredName):
         self.info("subcolumns for %s" % (watchdogName))
         device = Device(watchdogName)
-        for extra in device['ExtraAttrList'].value:
+        attrLst = list(device['ExtraAttrList'].value)
+        attrLst.sort()
+        for extra in attrLst:
             self.info("column for %s" % (extra))
             column = self._getColumn(extra)
             attrName = "%s/%s\\%s" % (watchdogName,

@@ -23,5 +23,6 @@ __license__ = "GPLv3+"
 __status__ = "development"
 
 
+from stateList import StateList
 from tableView import TableView
 from taurusDevCombo import TaurusDevCombo

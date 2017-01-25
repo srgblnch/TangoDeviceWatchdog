@@ -23,6 +23,7 @@ __license__ = "GPLv3+"
 __status__ = "development"
 
 from taurus.qt.qtgui.base import TaurusBaseComponent
+from widgets import StateList
 
 
 class Component(TaurusBaseComponent):
@@ -97,8 +98,12 @@ class Component(TaurusBaseComponent):
                 if self._devName:
                     if self._setModelWithAttrs(self._devName):
                         return True
+                    if type(self._widget) is StateList:
+                        self._setStateList(self._devName, self._name)
+                        return True
                     else:
                         self._setDeviceAsModel(self._devName)
+                        return True
                 else:
                     self.error("No conditions for setModel()")
         except Exception as e:
@@ -117,3 +122,6 @@ class Component(TaurusBaseComponent):
             self.info("setmodel(%s)" % (self._widget.getModel()))
             return True
         return False
+
+    def _setStateList(self, devName, state):
+        self._widget.setModel([devName, state])
