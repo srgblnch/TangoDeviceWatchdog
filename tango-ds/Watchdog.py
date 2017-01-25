@@ -113,6 +113,10 @@ class Watchdog(PyTango.Device_4Impl):
                                            PyTango.READ, 1000)
         self.add_attribute(alldevNames, self._readAllDevNames)
         self._extraAttrs = self._prepare_ExtraAttrs()
+        allExtraAttrs = PyTango.SpectrumAttr('ExtraAttrList',
+                                             PyTango.DevString,
+                                             PyTango.READ, 1000)
+        self.add_attribute(allExtraAttrs, self._readAllExtraAttrs)
         extraAttrsDct = {}
         for attrName in self._extraAttrs:
             extraAttrsDct[attrName] = []
@@ -364,6 +368,9 @@ class Watchdog(PyTango.Device_4Impl):
 
     def _readAllDevNames(self, attr):
         attr.set_value(self._allDevices)
+
+    def _readAllExtraAttrs(self, attr):
+        attr.set_value(self._extraAttrs)
 
     def _readExtraAttrLst(self, attr):
         attrName = attr.get_name()
