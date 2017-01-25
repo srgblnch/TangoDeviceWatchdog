@@ -1,0 +1,4 @@
+#!/bin/sh
+#Make sure to give this file execution permisions
+#taurusgui taurus-gui $*
+python WatchdogGui.py
