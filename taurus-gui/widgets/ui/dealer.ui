@@ -105,7 +105,7 @@
           </widget>
          </item>
          <item row="2" column="0" colspan="5">
-          <layout class="QGridLayout" name="tableLayout"/>
+          <layout class="QGridLayout" name="devList"/>
          </item>
          <item row="0" column="0">
           <spacer name="horizontalSpacer_3">
