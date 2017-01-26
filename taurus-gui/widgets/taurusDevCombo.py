@@ -23,7 +23,11 @@ __license__ = "GPLv3+"
 __status__ = "development"
 
 import sys
-from taurus import Authority, Logger
+try:
+    from taurus import Authority, Logger
+except:  # taurus 3
+    from taurus import Database as Authority
+    from taurus import Logger
 from taurus.qt.qtgui.util.ui import UILoadable
 from taurus.qt.qtgui.container import TaurusWidget
 from taurus.external.qt import Qt, QtGui, QtCore

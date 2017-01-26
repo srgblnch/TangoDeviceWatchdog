@@ -24,5 +24,6 @@ __status__ = "development"
 
 
 from stateList import StateList
+from strArray import StringArrayWidget
 from tableView import TableView
 from taurusDevCombo import TaurusDevCombo

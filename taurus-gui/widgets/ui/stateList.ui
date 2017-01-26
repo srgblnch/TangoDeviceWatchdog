@@ -6,8 +6,8 @@
    <rect>
     <x>0</x>
     <y>0</y>
-    <width>238</width>
-    <height>175</height>
+    <width>223</width>
+    <height>338</height>
    </rect>
   </property>
   <property name="windowTitle">
@@ -25,7 +25,7 @@
         <x>0</x>
         <y>0</y>
         <width>209</width>
-        <height>201</height>
+        <height>324</height>
        </rect>
       </property>
       <layout class="QGridLayout" name="gridLayout_3">
@@ -55,7 +55,14 @@
           </widget>
          </item>
          <item row="1" column="0" colspan="2">
-          <widget class="TaurusValuesTable" name="devList"/>
+          <widget class="StringArrayWidget" name="devList">
+           <property name="minimumSize">
+            <size>
+             <width>150</width>
+             <height>200</height>
+            </size>
+           </property>
+          </widget>
          </item>
         </layout>
        </item>
@@ -117,9 +124,9 @@
    <header>taurus.qt.qtgui.display</header>
   </customwidget>
   <customwidget>
-   <class>TaurusValuesTable</class>
+   <class>StringArrayWidget</class>
    <extends>TaurusWidget</extends>
-   <header>taurus.qt.qtgui.table</header>
+   <header>widgets.strArray</header>
    <container>1</container>
   </customwidget>
  </customwidgets>

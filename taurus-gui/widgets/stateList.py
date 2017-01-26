@@ -38,8 +38,7 @@ class StateList(TaurusWidget):
         basePath = os.path.dirname(__file__)
         if len(basePath) == 0:
             basePath = '.'
-        self.loadUi(filename="stateList.ui",
-                    path=basePath+"/ui")
+        self.loadUi(filename="stateList.ui", path=basePath+"/ui")
 
     _model = None
 
@@ -49,9 +48,10 @@ class StateList(TaurusWidget):
     def setModel(self, model):
         if model != self._model and len(model) == 2:
             try:
-                self.info("New model: %r" % (model))
-                self._setAttributes(model[0], model[1])
-                self._model = model
+                device, state = str(model[0]), str(model[1])
+                self.info("New model: %s, %s" % (device, state))
+                self._setAttributes(device, state)
+                self._model = [device, state]
             except Exception as e:
                 self.error("New model not valid: %s" % (e))
                 self._setAttributes(self._model[0], self._model[1])
@@ -63,15 +63,8 @@ class StateList(TaurusWidget):
         try:
             device['%sDevices' % (state)].value
         except:
-            raise Exception("model %s doesn't monitor %s state" % (model, state))
+            raise Exception("model %s doesn't monitor %s state"
+                            % (model, state))
         self.ui.stateLabel.setText(state)
         self.ui.number.setModel("%s/%sDevices" % (model, state))
         self.ui.devList.setModel("%s/%sDevicesList" % (model, state))
-        self._adjustTable()
-    
-    def _adjustTable(self):
-        self.ui.devList._rwModeCB.hide()
-        self.ui.devList._label.hide()
-        tableView = self.ui.devList._tableView
-        tableView.horizontalHeader().setResizeMode(Qt.QHeaderView.Stretch)
-        tableView.resizeColumnsToContents()

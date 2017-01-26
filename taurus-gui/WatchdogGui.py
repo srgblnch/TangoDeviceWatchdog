@@ -44,10 +44,11 @@ class MainWindow(TaurusGui):
         self.loadDefaultPerspective()
         self.splashScreen().finish(self)
 
-    _panels = {'tableView': {TYPE: TableView}, 
+    _panels = {'tableView': {TYPE: TableView},
                'running': {TYPE: StateList},
                'fault': {TYPE: StateList},
-               'hang': {TYPE: StateList}}
+               'hang': {TYPE: StateList}
+               }
 
     def initComponents(self):
         self._components = {}

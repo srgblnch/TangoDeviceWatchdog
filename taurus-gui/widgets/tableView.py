@@ -38,8 +38,7 @@ class TableView(TaurusWidget):
         basePath = os.path.dirname(__file__)
         if len(basePath) == 0:
             basePath = '.'
-        self.loadUi(filename="tableView.ui",
-                    path=basePath+"/ui")
+        self.loadUi(filename="tableView.ui", path=basePath+"/ui")
 
     _model = None
     _extraColumns = []
@@ -48,6 +47,7 @@ class TableView(TaurusWidget):
         return self._model
 
     def setModel(self, model):
+        model = str(model)
         if model != self._model:
             try:
                 self.info("New model: %r" % (model))
