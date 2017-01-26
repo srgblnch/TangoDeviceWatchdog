@@ -49,7 +49,7 @@ class StateList(TaurusWidget):
         if model != self._model and len(model) == 2:
             try:
                 device, state = str(model[0]), str(model[1])
-                self.info("New model: %s, %s" % (device, state))
+                self.debug("New model: %s, %s" % (device, state))
                 self._setAttributes(device, state)
                 self._model = [device, state]
             except Exception as e:
@@ -61,7 +61,7 @@ class StateList(TaurusWidget):
     def _setAttributes(self, model, state):
         device = Device(model)
         try:
-            device['%sDevices' % (state)].value
+            device['%sDevices' % (state)]
         except:
             raise Exception("model %s doesn't monitor %s state"
                             % (model, state))

@@ -23,6 +23,7 @@ __license__ = "GPLv3+"
 __status__ = "development"
 
 
+from dealer import Dealer
 from stateList import StateList
 from strArray import StringArrayWidget
 from tableView import TableView

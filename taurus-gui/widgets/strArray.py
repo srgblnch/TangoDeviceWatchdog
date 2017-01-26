@@ -46,15 +46,22 @@ class StringArrayWidget(TaurusWidget):
         model = self.getModel()
         if model == evt_src:
             self.warning("Event received from %s that doesn't "
-                         "correspond with %s" % (model, evt_src))
+                         "correspond with %s" % (evt_src, model))
             return
         if evt_type in (TaurusEventType.Change,
                         TaurusEventType.Periodic)\
                 and evt_value is not None:
-            self._text.setText(self._list2lines(evt_value.value))
+            try:  # taurus4
+                value = evt_value.rvalue
+            except:  # taurus3
+                value = evt_value.value
+            self._text.setText(self._list2lines(value))
         elif evt_type == TaurusEventType.Config:
             attr = self.getModelObj()
-            value = attr.read().value
+            try:  # taurus4
+                value = attr.rvalue
+            except:  # taurus3
+                value = attr.read().value
             self._text.setText(self._list2lines(value))
 
     def _list2lines(self, lst):

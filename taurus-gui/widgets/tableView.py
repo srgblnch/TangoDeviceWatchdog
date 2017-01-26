@@ -50,7 +50,7 @@ class TableView(TaurusWidget):
         model = str(model)
         if model != self._model:
             try:
-                self.info("New model: %r" % (model))
+                self.debug("New model: %r" % (model))
                 self._buildTable(model)
                 self._model = model
             except Exception as e:
@@ -62,8 +62,12 @@ class TableView(TaurusWidget):
     def _buildTable(self, devName):
         device = Device(devName)
         if self._rowCount() != 1:
-            self.info("clean rows")  # TODO
-        for i, monitored in enumerate(device['DevicesList'].value):
+            self.debug("clean rows")  # TODO
+        try:  # taurus4
+            values = device['DevicesList'].rvalue
+        except:  # taurus3
+            values = device['DevicesList'].value
+        for i, monitored in enumerate(values):
             self._setRow(i+1, devName, monitored)
         # TODO: if the watchdog has an attrLst for this column add a button
         #       on the bottom of the current column to display the plot.
@@ -72,7 +76,7 @@ class TableView(TaurusWidget):
         return self.ui.table.rowCount()
 
     def _setRow(self, row, watchdogName, monitoredName):
-        self.info("Build a row %d with device %s" % (row, monitoredName))
+        self.debug("Build a row %d with device %s" % (row, monitoredName))
         name = QtGui.QLabel("%s" % (monitoredName), self)
         self.ui.table.addWidget(name, row, 0)
         stateLed = TaurusLed()
@@ -82,17 +86,21 @@ class TableView(TaurusWidget):
         self._setSubcolumns(row, watchdogName, monitoredName)
 
     def _setSubcolumns(self, row, watchdogName, monitoredName):
-        self.info("subcolumns for %s" % (watchdogName))
+        self.debug("subcolumns for %s" % (watchdogName))
         device = Device(watchdogName)
-        attrLst = list(device['ExtraAttrList'].value)
+        try:  # taurus4
+            value = device['ExtraAttrList'].rvalue
+        except:  # taurus3
+            value = device['ExtraAttrList'].value
+        attrLst = list(value)
         attrLst.sort()
         for extra in attrLst:
-            self.info("column for %s" % (extra))
+            self.debug("column for %s" % (extra))
             column = self._getColumn(extra)
             attrName = "%s/%s\\%s" % (watchdogName,
                                       monitoredName.replace('/', '\\'),
                                       extra)
-            self.info("attrName: %s" % (attrName))
+            self.debug("attrName: %s" % (attrName))
             if Attribute(attrName).isWritable():
                 self._readWriteWidget(attrName, row, column)
             else:
@@ -104,7 +112,7 @@ class TableView(TaurusWidget):
             name = QtGui.QLabel("%s" % (extra), self)
             column = self._extraColumns.index(extra)+2
             self.ui.table.addWidget(name, 0, column)
-            self.info("Added the label to the header. Column %d" % column)
+            self.debug("Added the label to the header. Column %d" % column)
         else:
             column = self._extraColumns.index(extra)+2
         return column
@@ -113,7 +121,7 @@ class TableView(TaurusWidget):
         widget = TaurusLabel()
         widget.setModel(model)
         self.ui.table.addWidget(widget, row, column)
-        self.info("Added a Read Only widget")
+        self.debug("Added a Read Only widget")
 
     def _readWriteWidget(self, model, row, column):
         widget = QtGui.QHBoxLayout()
@@ -124,4 +132,4 @@ class TableView(TaurusWidget):
         write.setModel(model)
         widget.addWidget(write, 1)
         self.ui.table.addLayout(widget, row, column)
-        self.info("Added a Read Write widget pair")
+        self.debug("Added a Read Write widget pair")
