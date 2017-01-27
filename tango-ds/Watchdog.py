@@ -105,10 +105,11 @@ class Watchdog(PyTango.Device_4Impl):
                         self.error_stream(errMsg)
                         traceback.print_exc()
         timeSeparation = DEFAULT_RECHECK_TIME/len(self._allDevices)
-        self.info_stream("In %s::_processDevicesListProperty() %d in elements "
-                         "(%g seconds time separation) DevicesList = %r"
-                         % (self.get_name(), len(self._allDevices),
-                            timeSeparation, self._allDevices))
+        self.debug_stream("In %s::_processDevicesListProperty() %d in "
+                          "elements (%g seconds time separation) "
+                          "DevicesList = %r"
+                          % (self.get_name(), len(self._allDevices),
+                             timeSeparation, self._allDevices))
         alldevNames = PyTango.SpectrumAttr('DevicesList', PyTango.DevString,
                                            PyTango.READ, 1000)
         self.add_attribute(alldevNames, self._readAllDevNames)
@@ -129,9 +130,9 @@ class Watchdog(PyTango.Device_4Impl):
                     extraAttrsDct[attrName]['type'].append(attrType)
                     extraAttrsDct[attrName]['label'].append(attrLabel)
                 startDelay = timeSeparation*i
-                self.info_stream("for %d. device %s there will be a delay "
-                                 "of %g seconds" % (i+1, devName,
-                                                    startDelay))
+                self.debug_stream("for %d. device %s there will be a delay "
+                                  "of %g seconds" % (i+1, devName,
+                                                     startDelay))
                 dog = Dog(devName, self._joinerEvent, startDelay,
                           self._extraAttrs, self)
                 dog.tryFaultRecovery = self.TryFaultRecover
@@ -150,9 +151,10 @@ class Watchdog(PyTango.Device_4Impl):
             if len(attrTypes) != len(self._allDevices):
                 self.error_stream("Not all the device succeed building the "
                                   "extraAttr %s" % (attrName))
-            elif all(attrTypes) != attrTypes[0]:
+            elif not all([True if each == attrTypes[0] else False
+                          for each in attrTypes]):
                 self.error_stream("Not all the devices have the same attrType "
-                                  "for %s" % (attrName))
+                                  "for %s: %s" % (attrName, attrTypes))
             extraAttrLst = PyTango.SpectrumAttr(attrName, attrTypes[0],
                                                 PyTango.READ, 1000)
             aprop = PyTango.UserDefaultAttrProp()
@@ -169,7 +171,7 @@ class Watchdog(PyTango.Device_4Impl):
             self.error_stream("Exception building the dealer: %s" % (e))
             traceback.print_exc()
         else:
-            self.info_stream("Dealer build")
+            self.debug_stream("Dealer build")
 
     def _buildDealerAttrs(self):
         # list of possible dealers
@@ -193,9 +195,9 @@ class Watchdog(PyTango.Device_4Impl):
         dogsLst = self.DevicesDict.values()
         statesLst = [PyTango.DevState.RUNNING]
         if value == 'Equidistant':
-            distance = 1000
+            distance = [1000, 1000]
         elif value == 'MinMax':
-            distance = [0, 5000]
+            distance = [1000, 25000]
         else:
             return
         self._dealer = BuildDealer(value, attrLst=dealerLst,
@@ -368,6 +370,7 @@ class Watchdog(PyTango.Device_4Impl):
         value = data[0]
         if self._dealer and value in self._dealer.types():
             self._rebuildDealer(value)
+            self._dealer.distribute()
 
     def read_Dealers(self, attr):
         if not self._dealer:
@@ -385,7 +388,7 @@ class Watchdog(PyTango.Device_4Impl):
         attrName = attr.get_name()
         attrType = attr.get_data_type()
         values = []
-        self.info_stream("collecting %s" % (attrName))
+        self.debug_stream("collecting %s" % (attrName))
         for devName in self._allDevices:
             value = self.DevicesDict[devName].getExtraAttr(attrName)
             if value is None:
@@ -395,7 +398,7 @@ class Watchdog(PyTango.Device_4Impl):
                     value = float('nan')
                 else:  # if attrType in [PyTango.DevShort, PyTango.DevLong]:
                     value = 0
-            self.info_stream("\tdevice %s: %s" % (devName, value))
+            self.debug_stream("\tdevice %s: %s" % (devName, value))
             values.append(value)
         attr.set_value(values)
 
@@ -512,7 +515,7 @@ class Watchdog(PyTango.Device_4Impl):
     def appendToLst(self, lst, name, who):
         if not lst.count(who):
             lst.append(who)
-            self.info_stream("%s append to %s list" % (who, name))
+            self.debug_stream("%s append to %s list" % (who, name))
             return True
         else:
             self.warn_stream("%s was already in the %s list" % (who, name))
