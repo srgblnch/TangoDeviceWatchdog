@@ -258,7 +258,7 @@ class Watchdog(PyTango.Device_4Impl):
                     w_meth = None
                 is_allowed = Watchdog.is_ExtraAttribute_allowed
                 aprop = PyTango.UserDefaultAttrProp()
-                aprop.set_label(attrCfg.label)
+                aprop.set_label("%s/%s" % (fullAttrName, attrCfg.label))
                 dynAttr.set_default_properties(aprop)
                 self.add_attribute(dynAttr,
                                    r_meth=Watchdog.read_ExtraAttribute,
