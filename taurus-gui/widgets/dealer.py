@@ -100,6 +100,7 @@ class RunningLayout(TaurusBaseComponent):
         self.call__init__(TaurusBaseComponent, name, parent)
 
     _widget = None
+    _header = {}
     _rows = {}
     _extraAttrs = ["ethernetframetransmissiondelay",
                    "ethernetinterpacketdelay"]
@@ -152,14 +153,19 @@ class RunningLayout(TaurusBaseComponent):
             for value in remove:
                 self._removeRow(self._rows[value])
                 self._rows.pop(value)
-            self.info("Layout updated to %s" % (self._rows.keys()))
+            if len(self._rows.keys()) == 0:
+                self._removeHeader()
+            self.debug("Layout updated to %s" % (self._rows.keys()))
         else:
             self.error("No widget set to introduce value names")
 
     def _newRow(self, devName):
         watchdogName = Attribute(self.getModel()).getParent().getNormalName()
         row = self._widget.count()
-        self.info("New row %d -> %s" % (row, devName))
+        if row == 0:
+            self._addHeader()
+            row += 1
+        self.debug("New row %d -> %s" % (row, devName))
         name = self._buildLabel(devName, row)
         state = self._buildLed(devName, row)
         rowDct = {}
@@ -173,41 +179,58 @@ class RunningLayout(TaurusBaseComponent):
 
     def _replaceRow(self, devName, row):
         watchdogName = Attribute(self.getModel()).getParent().getNormalName()
-        self.info("Replace row %d: %s -> %s"
-                  % (row['number'], str(row['name'].text()), devName))
+        self.debug("Replace row %d: %s -> %s"
+                   % (row['number'], str(row['name'].text()), devName))
         row['name'].setText("%s" % (devName))
         row['state'].setModel(self._buildLedName(devName))
         for attrName in self._extraAttrs:
             model = self._getWatchdogAttrName(devName, attrName)
-            row[attrName][1].setModel(model)
-            row[attrName][2].setModel(model)
+            row[attrName]['read'].setModel(model)
+            row[attrName]['write'].setModel(model)
 
     def _removeRow(self, row):
-        self.info("Remove row %d: %s"
-                  % (row['number'], str(row['name'].text())))
+        self.debug("Remove row %d: %s"
+                   % (row['number'], str(row['name'].text())))
         self._widget.removeWidget(row['name'])
         self._widget.removeWidget(row['state'])
         row['name'].deleteLater()
         row['state'].deleteLater()
         for attrName in self._extraAttrs:
-            self._widget.removeLayout(row[attrName][0])
-            row[attrName][0].deleteLater()
+            self._widget.removeItem(row[attrName]['layout'])
+            row[attrName]['read'].deleteLater()
+            row[attrName]['write'].deleteLater()
+            row[attrName]['layout'].deleteLater()
+
+    def _addHeader(self):
+        for i, attrName in enumerate(self._extraAttrs):
+            label = Attribute("%s/%s" % (self._getWatchdog(), attrName)).label
+            self._header[attrName] = QtGui.QLabel("%s" % (label))
+            self._widget.addWidget(self._header[attrName], 0, i+2)
+
+    def _removeHeader(self):
+        for attrName in self._extraAttrs:
+            if attrName in self._header:
+                self._widget.removeWidget(self._header[attrName])
+                self._header[attrName].deleteLater()
+            else:
+                self.error("Cannot remove header %s from %s"
+                           % (attrName, self._header.keys()))
 
     def _separateValues(self, values):
-        self.info("Preparing to process %s against %s"
-                  % (values, self._rows.keys()))
+        self.debug("Preparing to process %s against %s"
+                   % (values, self._rows.keys()))
         new, existing, remove = [], [], []
         for value in values:
             if value in self._rows:
                 existing.append(value)
-                self.info("\t%s exist" % (value))
+                self.debug("\t%s exist" % (value))
             else:
                 new.append(value)
-                self.info("\t%s new" % (value))
+                self.debug("\t%s new" % (value))
         for value in self._rows:
             if value not in values:
                 remove.append(value)
-                self.info("\t%s remove" % (value))
+                self.debug("\t%s remove" % (value))
         return new, existing, remove
 
     def _getWatchdog(self):
@@ -226,7 +249,7 @@ class RunningLayout(TaurusBaseComponent):
     def _buildLedName(self, name):
         watchdogName = self._getWatchdog()
         ledName = self._getWatchdogAttrName(name, 'State')
-        self.info("Led %s -> %s" % (name, ledName))
+        self.debug("Led %s -> %s" % (name, ledName))
         return ledName
 
     def _buildLed(self, model, r):
@@ -245,7 +268,7 @@ class RunningLayout(TaurusBaseComponent):
         write.setModel(model)
         widget.addWidget(write, 1)
         self._widget.addLayout(widget, r, c)
-        return widget, read, write
+        return {'layout': widget, 'read': read, 'write': write}
 
     def _buildTaurusLabel(self, model, r, c):
         label = TaurusLabel()

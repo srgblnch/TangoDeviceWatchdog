@@ -96,7 +96,7 @@ class TableView(TaurusWidget):
         attrLst.sort()
         for extra in attrLst:
             self.debug("column for %s" % (extra))
-            column = self._getColumn(extra)
+            column = self._getColumn(watchdogName, extra)
             attrName = "%s/%s\\%s" % (watchdogName,
                                       monitoredName.replace('/', '\\'),
                                       extra)
@@ -106,10 +106,11 @@ class TableView(TaurusWidget):
             else:
                 self._readOnlyWidget(attrName, row, column)
 
-    def _getColumn(self, extra):
+    def _getColumn(self, devName, extra):
         if extra not in self._extraColumns:
+            device = Device(devName)
             self._extraColumns.append(extra)
-            name = QtGui.QLabel("%s" % (extra), self)
+            name = QtGui.QLabel("%s" % (device[extra].label), self)
             column = self._extraColumns.index(extra)+2
             self.ui.table.addWidget(name, 0, column)
             self.debug("Added the label to the header. Column %d" % column)
