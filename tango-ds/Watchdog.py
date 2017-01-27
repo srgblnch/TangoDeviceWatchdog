@@ -119,13 +119,15 @@ class Watchdog(PyTango.Device_4Impl):
         self.add_attribute(allExtraAttrs, self._readAllExtraAttrs)
         extraAttrsDct = {}
         for attrName in self._extraAttrs:
-            extraAttrsDct[attrName] = []
+            extraAttrsDct[attrName] = {'type': [], 'label': []}
         for i, devName in enumerate(self._allDevices):
             try:
                 self._build_WatchedStateAttribute(devName)
                 for attrName in self._extraAttrs:
-                    extraAttrsDct[attrName].append(self._build_ExtraAttr
-                                                   (devName, attrName))
+                    attrType, attrLabel = self._build_ExtraAttr(devName,
+                                                                attrName)
+                    extraAttrsDct[attrName]['type'].append(attrType)
+                    extraAttrsDct[attrName]['label'].append(attrLabel)
                 startDelay = timeSeparation*i
                 self.info_stream("for %d. device %s there will be a delay "
                                  "of %g seconds" % (i+1, devName,
@@ -143,7 +145,8 @@ class Watchdog(PyTango.Device_4Impl):
                 self.error_stream(errMsg)
                 traceback.print_exc()
         for attrName in self._extraAttrs:
-            attrTypes = extraAttrsDct[attrName]
+            attrTypes = extraAttrsDct[attrName]['type']
+            attrLabels = extraAttrsDct[attrName]['label']
             if len(attrTypes) != len(self._allDevices):
                 self.error_stream("Not all the device succeed building the "
                                   "extraAttr %s" % (attrName))
@@ -152,6 +155,9 @@ class Watchdog(PyTango.Device_4Impl):
                                   "for %s" % (attrName))
             extraAttrLst = PyTango.SpectrumAttr(attrName, attrTypes[0],
                                                 PyTango.READ, 1000)
+            aprop = PyTango.UserDefaultAttrProp()
+            aprop.set_label(attrLabels[0])
+            extraAttrLst.set_default_properties(aprop)
             self.add_attribute(extraAttrLst, self._readExtraAttrLst)
         self._buildDealer()
 
@@ -251,6 +257,9 @@ class Watchdog(PyTango.Device_4Impl):
                 else:
                     w_meth = None
                 is_allowed = Watchdog.is_ExtraAttribute_allowed
+                aprop = PyTango.UserDefaultAttrProp()
+                aprop.set_label(attrCfg.label)
+                dynAttr.set_default_properties(aprop)
                 self.add_attribute(dynAttr,
                                    r_meth=Watchdog.read_ExtraAttribute,
                                    w_meth=w_meth,
@@ -258,7 +267,7 @@ class Watchdog(PyTango.Device_4Impl):
                 self.set_change_event(dynAttrName, True, False)
             else:
                 raise Exception("Not yet supported array attributes")
-            return attrCfg.data_type
+            return attrCfg.data_type, attrCfg.label
         except Exception as e:
             errMsg = "In %s::_build_ExtraAttr() "\
                      "Exception in ExtraAttrList processing: "\
