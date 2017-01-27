@@ -28,7 +28,7 @@ from PyTango import DevState
 
 
 class Dealer(Logger):
-    def __init__(self, attrLst, dogsLst, statesLst=None,
+    def __init__(self, attrLst, dogsLst, statesLst=None, min=0,
                  *args, **kwargs):
         super(Dealer, self).__init__(*args, **kwargs)
 #         self.__attrLst = None
@@ -37,6 +37,7 @@ class Dealer(Logger):
         self._setDogsLst(dogsLst)
         self._setStatesLst(statesLst)
         self._setAttrLst(attrLst)
+        self.min = min
 
     def type(self):
         if type(self) == Equidistant:
@@ -76,6 +77,17 @@ class Dealer(Logger):
                                          "%s" % attrName)
         else:
             raise AssertionError("attrLst must be a list")
+
+    @property
+    def min(self):
+        return self.__min
+
+    @min.setter
+    def min(self, value):
+        if type(value) is int:
+            self.__min = value
+        else:
+            raise TypeError("Must be an integer")
 
     @property
     def attrLst(self):
@@ -158,34 +170,26 @@ class Equidistant(Dealer):
 
     def distribute(self):
         candidates = self.candidates
-        distribution = range(0, len(candidates)*self.distance, self.distance)
+        if len(candidates) == 0:
+            return
+        distribution = range(self.min,
+                             self.min+(len(candidates)*self.distance),
+                             self.distance)
+        reversed = distribution[:]
+        reversed.reverse()
         self.info_stream("Dealer distribution: %s" % (distribution))
         for i, dog in enumerate(candidates):
             self.info_stream("Working for candidate %d: %s"
                              % (i, dog.devName))
             for first, second in self.pairOfAttrs():
                 self.doWrite(dog, first, distribution[i])
-                self.doWrite(dog, second, distribution[-i])
+                self.doWrite(dog, second, reversed[i])
 
 
 class MinMax(Dealer):
-    def __init__(self, max, min=0, *args, **kwargs):
+    def __init__(self, max, *args, **kwargs):
         super(MinMax, self).__init__(*args, **kwargs)
-#         self.__min = None
-#         self.__max = None
-        self.min = min
         self.max = max
-
-    @property
-    def min(self):
-        return self.__min
-
-    @min.setter
-    def min(self, value):
-        if type(value) is int:
-            self.__min = value
-        else:
-            raise TypeError("Must be an integer")
 
     @property
     def max(self):
@@ -212,7 +216,7 @@ class MinMax(Dealer):
 
 def BuildEquidistantDealer(attrLst, dogsLst, statesLst, distance, parent):
     return Equidistant(attrLst=attrLst, dogsLst=dogsLst, statesLst=statesLst,
-                       distance=distance, parent=parent)
+                       min=distance[0], distance=distance[1], parent=parent)
 
 
 def BuildMinMaxDealer(attrLst, dogsLst, statesLst, distance, parent):
