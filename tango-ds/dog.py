@@ -247,8 +247,8 @@ class Dog(Logger):
             self._devProxy.subscribe_event('State',
                                            EventType.CHANGE_EVENT,
                                            self)
-        self.info_stream("Subscribed to %s/State (id=%d)"
-                         % (self.devName, self._eventId))
+        self.debug_stream("Subscribed to %s/State (id=%d)"
+                          % (self.devName, self._eventId))
         self.__subscribe_extraAttrs()
 
     def __unsubscribe_event(self):
@@ -270,9 +270,9 @@ class Dog(Logger):
                     self._devProxy.subscribe_event(attrName,
                                                    EventType.CHANGE_EVENT,
                                                    self)
-                self.info_stream("Subscribed to %s/%s (id=%d)"
-                                 % (self.devName, attrName,
-                                    self._extraEventIds[attrName]))
+                self.debug_stream("Subscribed to %s/%s (id=%d)"
+                                  % (self.devName, attrName,
+                                     self._extraEventIds[attrName]))
             except DevFailed as e:
                 self.warn_stream("%s/%s failed to subscribe event: %s"
                                  % (self.devName, attrName, e[0].desc))
@@ -341,8 +341,8 @@ class Dog(Logger):
                 return
             # ---
             if attrName == 'state':
-                self.debug_stream("%s push_event() value = %s"
-                                  % (self.devName, event.attr_value.value))
+                self.info_stream("%s push_event() value = %s"
+                                 % (self.devName, event.attr_value.value))
                 self.__checkDeviceState(event.attr_value.value)
                 self.fireEvent('State', event.attr_value.value)
             elif attrName in self._extraAttributes:
@@ -364,29 +364,36 @@ class Dog(Logger):
 
     def __checkDeviceState(self, newState=None):
         if self.__stateHasChange(newState):
-            self.debug_stream("%s state change from %s to %s"
-                              % (self.devName, self._devState, newState))
-            # state change to one of the lists
-            if newState is DevState.RUNNING:
-                self.appendToRunning(self.devName)
-            elif newState is DevState.FAULT:
-                self.appendToFault(self.devName)
-            # state change from one of the lists
-            elif self.__wasRunning() or self.isInRunningLst(self.devName):
-                self.removeFromRunning(self.devName)
-            elif self.__wasInFault() or self.isInFaultLst(self.devName):
-                self.removeFromFault(self.devName)
-                self._faultRecoveryCtr = 0
-            # recover from Hang
-            if self.devState is None or self.isInHangLst(self.devName):
-                self.debug_stream("%s received state information after "
-                                  "hang, remove from the list."
-                                  % (self.devName))
-                self.removeFromHang(self.devName)
-                self._hangRecoveryCtr = 0
+            self.info_stream("%s state change from %s to %s"
+                             % (self.devName, self._devState, newState))
+            oldState = self._devState
             self._devState = newState
-            self.debug_stream("%s store newer state %s"
-                              % (self.devName, self.devState))
+            try:
+                # state change to one of the lists
+                if newState is DevState.RUNNING:
+                    self.appendToRunning(self.devName)
+                elif newState is DevState.FAULT:
+                    self.appendToFault(self.devName)
+                # state change from one of the lists
+                elif self.__wasRunning() or self.isInRunningLst(self.devName):
+                    self.removeFromRunning(self.devName)
+                elif self.__wasInFault() or self.isInFaultLst(self.devName):
+                    self.removeFromFault(self.devName)
+                    self._faultRecoveryCtr = 0
+                # recover from Hang
+                if self.devState is None or self.isInHangLst(self.devName):
+                    self.debug_stream("%s received state information after "
+                                      "hang, remove from the list."
+                                      % (self.devName))
+                    self.removeFromHang(self.devName)
+                    self._hangRecoveryCtr = 0
+            except Exception as e:
+                self.error_stream("%s: Exception processing a newer state "
+                                  "(restoring the previous %s): %s"
+                                  % (self.devName, oldState, e))
+                self._devState = oldState
+            self.info_stream("%s store newer state %s"
+                             % (self.devName, self.devState))
         # else: nothing change, nothing to do.
 
     def __stateHasChange(self, newState):
@@ -494,7 +501,7 @@ class Dog(Logger):
             self.error_stream("%s in Fault recovery procedure Exception: %s"
                               % (self.devName, exceptionObj))
         else:
-            self.info_stream("%s Init() completed" % (self.devName))
+            self.debug_stream("%s Init() completed" % (self.devName))
             exceptionObj = None
         self._reportFaultProcedure(exceptionObj, statusMsg)
         self._faultRecoveryCtr += 1
@@ -522,7 +529,7 @@ class Dog(Logger):
             if res:
                 break
             sleep(DEFAULT_ASTOR_STOPWAIT)
-        self.info_stream("%s Astor start %s" % (self.devName, instance))
+        self.debug_stream("%s Astor start %s" % (self.devName, instance))
         return astor.start_servers([instance])
 
     def _reportFaultProcedure(self, exceptionObj, statusMsg):
@@ -612,14 +619,14 @@ class WatchdogTester(object):
     def appendToLst(self, lst, lstName, who):
         if not lst.count(who):
             lst.append(who)
-            self.info_stream("%s append to %s list" % (who, lstName))
+            self.debug_stream("%s append to %s list" % (who, lstName))
         else:
             self.warn_stream("%s was already in the %s list" % (who, lstName))
 
     def removeFromLst(self, lst, lstName, who):
         if lst.count(who):
             lst.pop(lst.index(who))
-            self.info_stream("%s removed from %s list" % (who, lstName))
+            self.debug_stream("%s removed from %s list" % (who, lstName))
         else:
             self.warn_stream("%s was NOT in the %s list" % (who, lstName))
 
