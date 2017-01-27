@@ -210,8 +210,9 @@ class RunningLayout(TaurusBaseComponent):
     def _removeHeader(self):
         for attrName in self._extraAttrs:
             if attrName in self._header:
-                self._widget.removeWidget(self._header[attrName])
-                self._header[attrName].deleteLater()
+                label = self._header.pop(attrName)
+                self._widget.removeWidget(label)
+                label.deleteLater()
             else:
                 self.error("Cannot remove header %s from %s"
                            % (attrName, self._header.keys()))
