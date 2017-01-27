@@ -28,7 +28,8 @@ from taurus.core.taurusbasetypes import TaurusEventType
 from taurus.external.qt import QtGui
 from taurus.qt.qtgui.base import TaurusBaseComponent
 from taurus.qt.qtgui.container import TaurusWidget
-from taurus.qt.qtgui.display import TaurusLed
+from taurus.qt.qtgui.display import TaurusLed, TaurusLabel
+from taurus.qt.qtgui.input import TaurusValueLineEdit
 from taurus.qt.qtgui.util.ui import UILoadable
 
 
@@ -54,7 +55,7 @@ class OptionsListener(TaurusBaseComponent):
         TaurusBaseComponent.setModel(self, model)
         try:  # taurus4
             values = Attribute(model).rvalue
-        except:  # taurus3
+        except AttributeError as e:  # taurus3
             values = Attribute(model).read().value
         self._setValueNames(values)
 
@@ -118,7 +119,7 @@ class RunningLayout(TaurusBaseComponent):
             TaurusBaseComponent.setModel(self, model)
             try:  # taurus4
                 values = Attribute(model).rvalue
-            except:  # taurus3
+            except AttributeError as e:  # taurus3
                 values = Attribute(model).read().value
             self._buildLayout(values)
 
@@ -139,6 +140,7 @@ class RunningLayout(TaurusBaseComponent):
                          % (evt_type, evt_value))
 
     def _buildLayout(self, values):
+        values = list(values)
         if self._widget is not None:
             new, existing, remove = self._separateValues(values)
             for value in new:
@@ -150,6 +152,7 @@ class RunningLayout(TaurusBaseComponent):
             for value in remove:
                 self._removeRow(self._rows[value])
                 self._rows.pop(value)
+            self.info("Layout updated to %s" % (self._rows.keys()))
         else:
             self.error("No widget set to introduce value names")
 
@@ -157,16 +160,15 @@ class RunningLayout(TaurusBaseComponent):
         watchdogName = Attribute(self.getModel()).getParent().getNormalName()
         row = self._widget.count()
         self.info("New row %d -> %s" % (row, devName))
-        name = QtGui.QLabel("%s" % (devName))
-        self._widget.addWidget(name, row, 0)
-        state = TaurusLed()
-        state.setModel("%s/%s\\State" % (watchdogName,
-                                         devName.replace('/', '\\')))
-        self._widget.addWidget(state, row, 1)
+        name = self._buildLabel(devName, row)
+        state = self._buildLed(devName, row)
         rowDct = {}
         rowDct['number'] = row
         rowDct['name'] = name
         rowDct['state'] = state
+        for i, attrName in enumerate(self._extraAttrs):
+            rowDct[attrName] = self._buildExtraAttr(devName, attrName,
+                                                    row, i+2)
         self._rows[devName] = rowDct
 
     def _replaceRow(self, devName, row):
@@ -174,10 +176,11 @@ class RunningLayout(TaurusBaseComponent):
         self.info("Replace row %d: %s -> %s"
                   % (row['number'], str(row['name'].text()), devName))
         row['name'].setText("%s" % (devName))
-        ledModel = "%s/%s\\State" % (watchdogName,
-                                     devName.replace('/', '\\'))
-        print ledModel
-        row['state'].setModel(ledModel)
+        row['state'].setModel(self._buildLedName(devName))
+        for attrName in self._extraAttrs:
+            model = self._getWatchdogAttrName(devName, attrName)
+            row[attrName][1].setModel(model)
+            row[attrName][2].setModel(model)
 
     def _removeRow(self, row):
         self.info("Remove row %d: %s"
@@ -186,6 +189,9 @@ class RunningLayout(TaurusBaseComponent):
         self._widget.removeWidget(row['state'])
         row['name'].deleteLater()
         row['state'].deleteLater()
+        for attrName in self._extraAttrs:
+            self._widget.removeLayout(row[attrName][0])
+            row[attrName][0].deleteLater()
 
     def _separateValues(self, values):
         self.info("Preparing to process %s against %s"
@@ -203,6 +209,53 @@ class RunningLayout(TaurusBaseComponent):
                 remove.append(value)
                 self.info("\t%s remove" % (value))
         return new, existing, remove
+
+    def _getWatchdog(self):
+        return Attribute(self.getModel()).getParent().getNormalName()
+
+    def _getWatchdogAttrName(self, devName, attrName):
+        watchdogName = self._getWatchdog()
+        return "%s/%s\\%s" % (watchdogName, devName.replace('/', '\\'),
+                              attrName)
+
+    def _buildLabel(self, model, r):
+        name = QtGui.QLabel("%s" % (model))
+        self._widget.addWidget(name, r, 0)
+        return name
+
+    def _buildLedName(self, name):
+        watchdogName = self._getWatchdog()
+        ledName = self._getWatchdogAttrName(name, 'State')
+        self.info("Led %s -> %s" % (name, ledName))
+        return ledName
+
+    def _buildLed(self, model, r):
+        led = TaurusLed()
+        led.setModel("%s" % (self._buildLedName(model)))
+        self._widget.addWidget(led, r, 1)
+        return led
+
+    def _buildExtraAttr(self, devName, attrName, r, c):
+        model = self._getWatchdogAttrName(devName, attrName)
+        widget = QtGui.QHBoxLayout()
+        read = TaurusLabel()
+        read.setModel(model)
+        widget.addWidget(read, 1)
+        write = TaurusValueLineEdit()
+        write.setModel(model)
+        widget.addWidget(write, 1)
+        self._widget.addLayout(widget, r, c)
+        return widget, read, write
+
+    def _buildTaurusLabel(self, model, r, c):
+        label = TaurusLabel()
+        label.setModel("%s" % (model))
+        return label
+
+    def _buildLineEdit(self, model, r, c):
+        edit = TaurusValueLineEdit()
+        edit.setModel("%s" % (model))
+        return edit
 
     def _cleanLayout(self):
         pass

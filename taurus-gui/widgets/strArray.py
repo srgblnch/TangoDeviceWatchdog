@@ -53,14 +53,14 @@ class StringArrayWidget(TaurusWidget):
                 and evt_value is not None:
             try:  # taurus4
                 value = evt_value.rvalue
-            except:  # taurus3
+            except AttributeError as e:  # taurus3
                 value = evt_value.value
             self._text.setText(self._list2lines(value))
         elif evt_type == TaurusEventType.Config:
             attr = self.getModelObj()
             try:  # taurus4
                 value = attr.rvalue
-            except:  # taurus3
+            except AttributeError as e:  # taurus3
                 value = attr.read().value
             self._text.setText(self._list2lines(value))
 

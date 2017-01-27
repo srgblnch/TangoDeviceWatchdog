@@ -65,7 +65,7 @@ class TableView(TaurusWidget):
             self.debug("clean rows")  # TODO
         try:  # taurus4
             values = device['DevicesList'].rvalue
-        except:  # taurus3
+        except AttributeError as e:  # taurus3
             values = device['DevicesList'].value
         for i, monitored in enumerate(values):
             self._setRow(i+1, devName, monitored)
@@ -90,7 +90,7 @@ class TableView(TaurusWidget):
         device = Device(watchdogName)
         try:  # taurus4
             value = device['ExtraAttrList'].rvalue
-        except:  # taurus3
+        except AttributeError as e:  # taurus3
             value = device['ExtraAttrList'].value
         attrLst = list(value)
         attrLst.sort()
